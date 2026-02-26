@@ -1,6 +1,6 @@
 # NAS Monitor
 
-A simple Python script that monitors your NAS and sends daily reports + threshold alerts via Telegram.
+A Python daemon that monitors your NAS and sends daily reports + threshold alerts via Telegram.
 
 ## Features
 
@@ -9,17 +9,11 @@ A simple Python script that monitors your NAS and sends daily reports + threshol
 - 🧠 RAM usage
 - 🐳 Docker container status
 - ⚠️ Instant alerts when thresholds are crossed
-- 📅 Daily digest report
+- 📅 Daily digest report at 8am
 
 ## Setup
 
-### 1. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
+### 1. Configure environment
 
 ```bash
 cp .env.example .env
@@ -28,15 +22,7 @@ nano .env
 
 Fill in your Telegram bot token and chat ID.
 
-### 3. Test it
-
-```bash
-python3 monitor.py
-```
-
-### 4a. Run with Docker (recommended)
-
-Add a `nas-monitor` service to your `docker-compose.yml`:
+### 2. Add the service to your `docker-compose.yml`
 
 ```yaml
 nas-monitor:
@@ -55,29 +41,13 @@ nas-monitor:
     - SYS_RAWIO
 ```
 
-Then start it:
+### 3. Start it
 
 ```bash
 docker compose up -d --build nas-monitor
 ```
 
-The container runs in daemon mode: daily report at 8am, alert checks every 15 minutes.
-
-### 4b. Set up cron jobs (alternative)
-
-```bash
-crontab -e
-```
-
-Add these lines:
-
-```
-# Daily report at 8am
-0 8 * * * cd /opt/fourmiliere_bot && python3 monitor.py
-
-# Alert check every 15 minutes
-*/15 * * * * cd /opt/fourmiliere_bot && python3 monitor.py --alert-only
-```
+The container runs as a daemon: daily report at 8am, alert checks every 15 minutes.
 
 ## Thresholds
 
@@ -89,16 +59,3 @@ Add these lines:
 | RAM usage | 85% | - |
 
 You can adjust thresholds in the `THRESHOLDS` dict in `monitor.py`.
-
-## Usage
-
-```bash
-# Send full daily report now
-python3 monitor.py
-
-# Only send message if thresholds are crossed
-python3 monitor.py --alert-only
-
-# Run as long-lived daemon (used by Docker)
-python3 monitor.py --daemon
-```
