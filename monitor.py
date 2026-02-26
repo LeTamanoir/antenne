@@ -10,6 +10,7 @@ import argparse
 import time
 from datetime import datetime
 
+import docker
 import psutil
 import requests
 from dotenv import load_dotenv
@@ -112,18 +113,11 @@ def get_ram_usage() -> dict:
 
 def get_docker_containers() -> list[dict]:
     try:
-        out = subprocess.check_output(
-            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}"],
-            text=True
-        )
-        containers = []
-        for line in out.strip().splitlines():
-            name, status = line.split("\t")
-            containers.append({
-                "name": name,
-                "running": status.startswith("Up"),
-            })
-        return containers
+        client = docker.from_env()
+        return [
+            {"name": c.name, "running": c.status == "running"}
+            for c in client.containers.list(all=True)
+        ]
     except Exception:
         return []
 
