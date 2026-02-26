@@ -69,11 +69,25 @@ REPORT_DOCKER = os.getenv("REPORT_DOCKER", "true").lower() not in ("0", "false",
 
 def send_telegram(message: str) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    })
+    try:
+        resp = requests.post(url, json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "Markdown"
+        }, timeout=10)
+        data = resp.json()
+        if not data.get("ok"):
+            print(f"Telegram API error: {data.get('description', data)}", flush=True)
+            # Retry without Markdown if entity parsing failed
+            resp = requests.post(url, json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+            }, timeout=10)
+            data = resp.json()
+            if not data.get("ok"):
+                print(f"Telegram API error (plain text retry): {data.get('description', data)}", flush=True)
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}", flush=True)
 
 
 def get_nvme_temp(device: str) -> int | None:
