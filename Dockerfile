@@ -9,4 +9,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["python3", "monitor.py", "--daemon"]
+CMD ["python3", "monitor.py"]

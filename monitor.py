@@ -5,22 +5,22 @@ Antenne - Sends daily reports and threshold alerts via Telegram.
 
 import os
 import signal
-import subprocess
-import re
-import argparse
+import telebot
+from pySMART import Device
 import time
 import threading
 from datetime import datetime
 
 import docker
 import psutil
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN, parse_mode="Markdown")
 
 # Device config
 def _parse_device_pairs(env_val: str) -> list[tuple[str, str]]:
@@ -70,41 +70,16 @@ DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 
 
 def send_telegram(message: str) -> None:
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        resp = requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "Markdown"
-        }, timeout=10)
-        data = resp.json()
-        if not data.get("ok"):
-            print(f"Telegram API error: {data.get('description', data)}", flush=True)
-            # Retry without Markdown if entity parsing failed
-            resp = requests.post(url, json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
-            }, timeout=10)
-            data = resp.json()
-            if not data.get("ok"):
-                print(f"Telegram API error (plain text retry): {data.get('description', data)}", flush=True)
+        bot.send_message(TELEGRAM_CHAT_ID, message)
     except Exception as e:
         print(f"Failed to send Telegram message: {e}", flush=True)
 
 
 def get_nvme_temp(device: str) -> int | None:
     try:
-        result = subprocess.run(
-            ["smartctl", "-a", device], capture_output=True, text=True
-        )
-        if result.returncode not in (0, 4):
-            print(f"smartctl {device} exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}", flush=True)
-        for line in result.stdout.splitlines():
-            if "Temperature:" in line and "Sensor" not in line:
-                match = re.search(r"(\d+)\s+Celsius", line)
-                if match:
-                    return int(match.group(1))
-        print(f"smartctl {device}: no temperature line found in output", flush=True)
+        dev = Device(device)
+        return dev.temperature
     except Exception as e:
         print(f"get_nvme_temp({device}) error: {e}", flush=True)
     return None
@@ -112,17 +87,8 @@ def get_nvme_temp(device: str) -> int | None:
 
 def get_hdd_temp(device: str) -> int | None:
     try:
-        result = subprocess.run(
-            ["smartctl", "-a", device], capture_output=True, text=True
-        )
-        if result.returncode not in (0, 4):
-            print(f"smartctl {device} exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}", flush=True)
-        for line in result.stdout.splitlines():
-            if "Temperature_Celsius" in line or "Temperature:" in line:
-                match = re.search(r"(\d+)$", line.strip())
-                if match:
-                    return int(match.group(1))
-        print(f"smartctl {device}: no temperature line found in output", flush=True)
+        dev = Device(device)
+        return dev.temperature
     except Exception as e:
         print(f"get_hdd_temp({device}) error: {e}", flush=True)
     return None
@@ -261,37 +227,18 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
-def poll_telegram_commands(stop_event: threading.Event) -> None:
-    """Poll Telegram for /report commands using long-polling and respond synchronously."""
-    offset = None
-    while not stop_event.is_set():
-        try:
-            params: dict = {"timeout": 30, "allowed_updates": ["message"]}
-            if offset is not None:
-                params["offset"] = offset
-            resp = requests.get(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-                params=params,
-                timeout=35,
-            )
-            data = resp.json()
-            if data.get("ok"):
-                for update in data.get("result", []):
-                    offset = update["update_id"] + 1
-                    msg = update.get("message", {})
-                    chat_id = str(msg.get("chat", {}).get("id", ""))
-                    text = msg.get("text", "")
-                    if chat_id == str(TELEGRAM_CHAT_ID) and text.startswith("/report"):
-                        now = datetime.now()
-                        print(f"[{now}] /report command received via Telegram", flush=True)
-                        report, alerts = build_report()
-                        send_telegram(report)
-                        if alerts:
-                            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-                            send_telegram(alert_msg)
-        except Exception as e:
-            print(f"Telegram polling error: {e}", flush=True)
-            stop_event.wait(10)
+@bot.message_handler(commands=["report"])
+def handle_report_command(message):
+    chat_id = str(message.chat.id)
+    if chat_id != str(TELEGRAM_CHAT_ID):
+        return
+    now = datetime.now()
+    print(f"[{now}] /report command received via Telegram", flush=True)
+    report, alerts = build_report()
+    send_telegram(report)
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        send_telegram(alert_msg)
 
 
 def run_daemon() -> None:
@@ -304,13 +251,15 @@ def run_daemon() -> None:
 
     def _handle_signal(signum, frame):
         print(f"Received signal {signum}, shutting down...", flush=True)
+        bot.stop_polling()
         stop_event.set()
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
     poll_thread = threading.Thread(
-        target=poll_telegram_commands, args=(stop_event,), daemon=True
+        target=lambda: bot.infinity_polling(timeout=30, long_polling_timeout=30),
+        daemon=True,
     )
     poll_thread.start()
 
@@ -346,25 +295,7 @@ def run_daemon() -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--alert-only", action="store_true",
-                        help="Only send message if thresholds are crossed")
-    parser.add_argument("--daemon", action="store_true",
-                        help="Run as daemon: daily report, alerts at configured intervals")
-    args = parser.parse_args()
-
-    if args.daemon:
-        run_daemon()
-        return
-
-    report, alerts = build_report()
-
-    if args.alert_only:
-        send_alerts(alerts)
-    else:
-        send_telegram(report)
-        send_alerts(alerts)
-
+    run_daemon()
 
 if __name__ == "__main__":
     main()
