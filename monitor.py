@@ -8,6 +8,7 @@ import subprocess
 import re
 import argparse
 import time
+import threading
 from datetime import datetime
 
 import docker
@@ -219,11 +220,45 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
+def poll_commands() -> None:
+    """Long-poll Telegram for bot commands and handle /report."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    offset = None
+
+    while True:
+        try:
+            params = {"timeout": 30, "allowed_updates": ["message"]}
+            if offset is not None:
+                params["offset"] = offset
+            resp = requests.get(url, params=params, timeout=40)
+            updates = resp.json().get("result", [])
+        except Exception:
+            time.sleep(5)
+            continue
+
+        for update in updates:
+            offset = update["update_id"] + 1
+            msg = update.get("message", {})
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            text = msg.get("text", "")
+
+            if chat_id != str(TELEGRAM_CHAT_ID):
+                continue
+
+            if text.startswith("/report"):
+                now = datetime.now()
+                print(f"[{now}] /report command received via Telegram", flush=True)
+                report, alerts = build_report()
+                send_telegram(report)
+                send_alerts(alerts)
+
+
 def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
+    threading.Thread(target=poll_commands, daemon=True).start()
     now = datetime.now()
     print(f"[{now}] Sending startup report", flush=True)
     report, alerts = build_report()
