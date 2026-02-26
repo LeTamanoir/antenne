@@ -9,7 +9,9 @@ A Python daemon for [fourmilière](https://github.com/LeTamanoir/antenne) that m
 - 🧠 RAM usage
 - 🐳 Docker container status
 - ⚠️ Instant alerts when thresholds are crossed
-- 📅 Daily digest report at 8am
+- 📅 Daily digest report at a configurable time (default 8:00)
+- 📩 Immediate report on daemon startup
+- 📬 On-demand report via `/report` Telegram command
 
 ## Setup
 
@@ -34,10 +36,6 @@ antenne:
     - /dev/sdb:/dev/sdb
   cap_add:
     - SYS_RAWIO
-  # Required on older kernels (Linux 4.x) — Docker's default seccomp profile
-  # blocks socket.socketpair(), which Python's asyncio event loop needs.
-  security_opt:
-    - seccomp=unconfined
 ```
 
 ### 3. Start it
@@ -46,7 +44,7 @@ antenne:
 docker compose up -d antenne
 ```
 
-The container runs as a daemon: daily report at 8am, alert checks every 15 minutes (both configurable via env vars).
+The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report by sending `/report` in the Telegram chat.
 
 ## Configuration
 
