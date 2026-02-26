@@ -7,6 +7,7 @@ A Python daemon that monitors the host and sends daily reports + threshold alert
 - 🌡️ NVMe and HDD temperatures
 - 💾 Disk usage for movies, TV, and system drives
 - 🧠 RAM usage
+- 🖥️ CPU usage
 - ⚠️ Instant alerts when thresholds are crossed
 - 📅 Daily digest report at a configurable time (default 8:00)
 - 📩 Immediate report on daemon startup
@@ -69,6 +70,7 @@ All values are configurable via environment variables.
 | `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
 | `REPORT_MINUTE` | `0` | Minute of the hour for the daily report (0–59) |
 | `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |
+| `METRICS_INTERVAL_SECONDS` | `30` | How often to collect metrics for graphs (seconds) |
 | `REPORT_NVME` | `true` | Include NVMe temperatures in the report |
 | `REPORT_HDD` | `true` | Include HDD temperatures in the report |
 | `REPORT_DISK` | `true` | Include disk usage in the report |

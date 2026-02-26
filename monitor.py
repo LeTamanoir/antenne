@@ -65,6 +65,7 @@ THRESHOLDS = {
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
 REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
 ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
+METRICS_INTERVAL_SECONDS = int(os.getenv("METRICS_INTERVAL_SECONDS", "30"))
 
 # Report sections
 REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no")
@@ -483,6 +484,17 @@ def run_daemon() -> None:
     send_alerts(alerts)
     store_metrics()
 
+    def _collect_metrics(stop_ev: threading.Event) -> None:
+        while not stop_ev.is_set():
+            stop_ev.wait(METRICS_INTERVAL_SECONDS)
+            if not stop_ev.is_set():
+                store_metrics()
+                cleanup_old_metrics()
+
+    metrics_thread = threading.Thread(
+        target=_collect_metrics, args=(stop_event,), daemon=True,
+    )
+    metrics_thread.start()
     while not stop_event.is_set():
         now = datetime.now()
 
@@ -503,8 +515,6 @@ def run_daemon() -> None:
             _, alerts = build_report()
             send_alerts(alerts)
             last_alert_ts = time.time()
-            store_metrics()
-            cleanup_old_metrics()
 
         stop_event.wait(60)
 
