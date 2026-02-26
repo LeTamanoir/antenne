@@ -3,12 +3,12 @@
 Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
+import asyncio
 import os
 import subprocess
 import re
 import argparse
 import time
-import threading
 from datetime import datetime
 
 import docker
@@ -234,43 +234,47 @@ async def handle_report_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(alert_msg, parse_mode="Markdown")
 
 
-def start_bot() -> None:
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("report", handle_report_command))
-    app.run_polling()
-
-
-def run_daemon() -> None:
+async def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
-    threading.Thread(target=start_bot, daemon=True).start()
-    now = datetime.now()
-    print(f"[{now}] Sending startup report", flush=True)
-    report, alerts = build_report()
-    send_telegram(report)
-    send_alerts(alerts)
 
-    while True:
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("report", handle_report_command))
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+
         now = datetime.now()
+        print(f"[{now}] Sending startup report", flush=True)
+        report, alerts = build_report()
+        send_telegram(report)
+        send_alerts(alerts)
 
-        # Daily report at configured hour
-        if now.hour == REPORT_HOUR and last_daily_date != now.date():
-            print(f"[{now}] Sending daily report", flush=True)
-            report, alerts = build_report()
-            send_telegram(report)
-            send_alerts(alerts)
-            last_daily_date = now.date()
+        while True:
+            now = datetime.now()
 
-        # Alert check at configured interval
-        if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
-            print(f"[{now}] Running alert check", flush=True)
-            _, alerts = build_report()
-            send_alerts(alerts)
-            last_alert_ts = time.time()
+            # Daily report at configured hour
+            if now.hour == REPORT_HOUR and last_daily_date != now.date():
+                print(f"[{now}] Sending daily report", flush=True)
+                report, alerts = build_report()
+                send_telegram(report)
+                send_alerts(alerts)
+                last_daily_date = now.date()
 
-        time.sleep(60)
+            # Alert check at configured interval
+            if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
+                print(f"[{now}] Running alert check", flush=True)
+                _, alerts = build_report()
+                send_alerts(alerts)
+                last_alert_ts = time.time()
+
+            await asyncio.sleep(60)
+
+        await app.updater.stop()
+        await app.stop()
 
 
 def main():
@@ -282,7 +286,7 @@ def main():
     args = parser.parse_args()
 
     if args.daemon:
-        run_daemon()
+        asyncio.run(run_daemon())
         return
 
     report, alerts = build_report()
