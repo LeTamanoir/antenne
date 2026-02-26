@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NAS Monitor - Sends daily reports and threshold alerts via Telegram.
+Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
 import os
@@ -149,7 +149,7 @@ def build_report() -> tuple[str, list[str]]:
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    lines.append(f"🖥️ *NAS Monitor Report*")
+    lines.append(f"🐜 *Antenne*")
     lines.append(f"📅 {now}\n")
 
     # NVMe drives
@@ -229,7 +229,7 @@ def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
 
-    print("NAS Monitor daemon started", flush=True)
+    print("Antenne daemon started", flush=True)
 
     while True:
         now = datetime.now()

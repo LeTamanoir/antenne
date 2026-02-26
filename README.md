@@ -1,6 +1,6 @@
-# NAS Monitor
+# Antenne
 
-A Python daemon that monitors your NAS and sends daily reports + threshold alerts via Telegram.
+A Python daemon for [fourmilière](https://github.com/LeTamanoir/fourmiliere_bot) that monitors the host and sends daily reports + threshold alerts via Telegram.
 
 ## Features
 
@@ -25,7 +25,7 @@ Fill in your Telegram bot token and chat ID. All other values have sensible defa
 ### 2. Add the service to your `docker-compose.yml`
 
 ```yaml
-nas-monitor:
+antenne:
   image: ghcr.io/letamanoir/fourmiliere_bot:latest
   restart: unless-stopped
   env_file: /opt/fourmiliere_bot/.env
@@ -44,7 +44,7 @@ nas-monitor:
 ### 3. Start it
 
 ```bash
-docker compose up -d nas-monitor
+docker compose up -d antenne
 ```
 
 The container runs as a daemon: daily report at 8am, alert checks every 15 minutes (both configurable via env vars).
