@@ -1,5 +1,4 @@
 pyTelegramBotAPI
 psutil
 python-dotenv
-docker
 pySMART

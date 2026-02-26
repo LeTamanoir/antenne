@@ -1,13 +1,12 @@
 # Antenne
 
-A Python daemon for [fourmilière](https://github.com/LeTamanoir/antenne) that monitors the host and sends daily reports + threshold alerts via Telegram.
+A Python daemon that monitors the host and sends daily reports + threshold alerts via Telegram.
 
 ## Features
 
 - 🌡️ NVMe and HDD temperatures
 - 💾 Disk usage for movies, TV, and system drives
 - 🧠 RAM usage
-- 🐳 Docker container status
 - ⚠️ Instant alerts when thresholds are crossed
 - 📅 Daily digest report at a configurable time (default 8:00)
 - 📩 Immediate report on daemon startup
@@ -27,7 +26,6 @@ antenne:
   restart: unless-stopped
   env_file: /opt/antenne/.env
   volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
     - /mnt/movies:/mnt/movies:ro
     - /mnt/tv:/mnt/tv:ro
   devices:
@@ -36,33 +34,8 @@ antenne:
     - /dev/sdb:/dev/sdb
   cap_add:
     - SYS_RAWIO
+    - SYS_ADMIN
 ```
-
-#### Monitoring Docker inside a Proxmox LXC container
-
-If your Docker containers run inside an LXC container on the Proxmox host rather than directly on the host, mount the LXC's socket into the antenne container and point `DOCKER_SOCKET` at it.
-
-From the Proxmox host, the LXC's Docker socket is at `/var/lib/lxc/<CTID>/rootfs/var/run/docker.sock` (replace `<CTID>` with your LXC container ID, e.g. `100`).
-
-```yaml
-antenne:
-  image: ghcr.io/letamanoir/antenne:latest
-  restart: unless-stopped
-  env_file: /opt/antenne/.env
-  environment:
-    - DOCKER_SOCKET=/var/run/lxc-docker.sock
-  volumes:
-    - /var/lib/lxc/100/rootfs/var/run/docker.sock:/var/run/lxc-docker.sock
-    - /mnt/movies:/mnt/movies:ro
-    - /mnt/tv:/mnt/tv:ro
-  devices:
-    - /dev/nvme0:/dev/nvme0
-    - /dev/sda:/dev/sda
-    - /dev/sdb:/dev/sdb
-  cap_add:
-    - SYS_RAWIO
-```
-
 ### 3. Start it
 
 ```bash
@@ -96,5 +69,3 @@ All values are configurable via environment variables.
 | `REPORT_HDD` | `true` | Include HDD temperatures in the report |
 | `REPORT_DISK` | `true` | Include disk usage in the report |
 | `REPORT_RAM` | `true` | Include RAM usage in the report |
-| `REPORT_DOCKER` | `true` | Include Docker container status in the report |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Path to the Docker socket (useful for monitoring Docker inside a Proxmox LXC) |

@@ -11,7 +11,6 @@ import time
 import threading
 from datetime import datetime
 
-import docker
 import psutil
 from dotenv import load_dotenv
 
@@ -65,8 +64,6 @@ REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no
 REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
 REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
-REPORT_DOCKER = os.getenv("REPORT_DOCKER", "true").lower() not in ("0", "false", "no")
-DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 
 
 def send_telegram(message: str) -> None:
@@ -79,7 +76,10 @@ def send_telegram(message: str) -> None:
 def get_nvme_temp(device: str) -> int | None:
     try:
         dev = Device(device)
-        return dev.temperature
+        temp = dev.temperature
+        if temp is None:
+            print(f"pySMART {device}: temperature is None (model={dev.model}, interface={dev._interface}, attributes={dev.if_attributes.__dict__ if dev.if_attributes else None})", flush=True)
+        return temp
     except Exception as e:
         print(f"get_nvme_temp({device}) error: {e}", flush=True)
     return None
@@ -88,7 +88,10 @@ def get_nvme_temp(device: str) -> int | None:
 def get_hdd_temp(device: str) -> int | None:
     try:
         dev = Device(device)
-        return dev.temperature
+        temp = dev.temperature
+        if temp is None:
+            print(f"pySMART {device}: temperature is None (model={dev.model}, interface={dev._interface})", flush=True)
+        return temp
     except Exception as e:
         print(f"get_hdd_temp({device}) error: {e}", flush=True)
     return None
@@ -110,18 +113,6 @@ def get_ram_usage() -> dict:
         "used": mem.used // (1024 ** 3),
         "percent": mem.percent,
     }
-
-
-def get_docker_containers() -> list[dict] | None:
-    try:
-        client = docker.DockerClient(base_url=f"unix://{DOCKER_SOCKET}")
-        return [
-            {"name": c.name, "running": c.status == "running"}
-            for c in client.containers.list(all=True)
-        ]
-    except Exception as e:
-        print(f"get_docker_containers() error (socket={DOCKER_SOCKET}): {e}", flush=True)
-        return None
 
 
 def temp_emoji(temp: int, warn: int, crit: int) -> str:
@@ -202,21 +193,6 @@ def build_report() -> tuple[str, list[str]]:
         if ram["percent"] >= THRESHOLDS["ram_warn"]:
             alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
         lines.append("")
-
-    # Docker containers
-    if REPORT_DOCKER:
-        containers = get_docker_containers()
-        if containers is None:
-            lines.append("🐳 *Docker:* ❓ Unable to read containers")
-        elif containers:
-            lines.append("🐳 *Docker Containers:*")
-            for c in containers:
-                emoji = "✅" if c["running"] else "❌"
-                lines.append(f"  {emoji} `{c['name']}`")
-                if not c["running"]:
-                    alerts.append(f"❌ ALERT: Container `{c['name']}` is DOWN!")
-        else:
-            lines.append("🐳 *Docker:* ✅ No containers")
 
     return "\n".join(lines), alerts
 
