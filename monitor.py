@@ -8,12 +8,15 @@ import subprocess
 import re
 import argparse
 import time
+import threading
 from datetime import datetime
 
 import docker
 import psutil
 import requests
 from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 load_dotenv()
 
@@ -219,11 +222,35 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
+async def handle_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if str(update.effective_chat.id) != str(TELEGRAM_CHAT_ID):
+        return
+    now = datetime.now()
+    print(f"[{now}] /report command received via Telegram", flush=True)
+    report, alerts = build_report()
+    await update.message.reply_text(report, parse_mode="Markdown")
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        await update.message.reply_text(alert_msg, parse_mode="Markdown")
+
+
+def start_bot() -> None:
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("report", handle_report_command))
+    app.run_polling()
+
+
 def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
+    threading.Thread(target=start_bot, daemon=True).start()
+    now = datetime.now()
+    print(f"[{now}] Sending startup report", flush=True)
+    report, alerts = build_report()
+    send_telegram(report)
+    send_alerts(alerts)
 
     while True:
         now = datetime.now()
