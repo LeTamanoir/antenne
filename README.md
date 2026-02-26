@@ -23,7 +23,7 @@ Create a `.env` file with at minimum your Telegram credentials. All other values
 antenne:
   image: ghcr.io/letamanoir/antenne:latest
   restart: unless-stopped
-  env_file: /opt/fourmiliere_bot/.env
+  env_file: /opt/antenne/.env
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - /mnt/movies:/mnt/movies:ro
