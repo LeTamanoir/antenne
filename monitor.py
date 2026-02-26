@@ -66,6 +66,7 @@ REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
 REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
 REPORT_DOCKER = os.getenv("REPORT_DOCKER", "true").lower() not in ("0", "false", "no")
+DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 
 
 def send_telegram(message: str) -> None:
@@ -139,7 +140,7 @@ def get_ram_usage() -> dict:
 
 def get_docker_containers() -> list[dict] | None:
     try:
-        client = docker.from_env()
+        client = docker.DockerClient(base_url=f"unix://{DOCKER_SOCKET}")
         return [
             {"name": c.name, "running": c.status == "running"}
             for c in client.containers.list(all=True)
