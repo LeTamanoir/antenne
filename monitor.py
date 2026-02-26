@@ -66,6 +66,7 @@ REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
 REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
 REPORT_DOCKER = os.getenv("REPORT_DOCKER", "true").lower() not in ("0", "false", "no")
+DOCKER_SOCKET = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
 
 
 def send_telegram(message: str) -> None:
@@ -96,13 +97,17 @@ def get_nvme_temp(device: str) -> int | None:
         result = subprocess.run(
             ["smartctl", "-a", device], capture_output=True, text=True
         )
+        if result.returncode not in (0, 4):
+            print(f"smartctl {device} exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}", flush=True)
         for line in result.stdout.splitlines():
             if "Temperature:" in line and "Sensor" not in line:
                 match = re.search(r"(\d+)\s+Celsius", line)
                 if match:
                     return int(match.group(1))
-    except Exception:
-        return None
+        print(f"smartctl {device}: no temperature line found in output", flush=True)
+    except Exception as e:
+        print(f"get_nvme_temp({device}) error: {e}", flush=True)
+    return None
 
 
 def get_hdd_temp(device: str) -> int | None:
@@ -110,13 +115,17 @@ def get_hdd_temp(device: str) -> int | None:
         result = subprocess.run(
             ["smartctl", "-a", device], capture_output=True, text=True
         )
+        if result.returncode not in (0, 4):
+            print(f"smartctl {device} exited {result.returncode}: {result.stderr.strip() or result.stdout.strip()}", flush=True)
         for line in result.stdout.splitlines():
             if "Temperature_Celsius" in line or "Temperature:" in line:
                 match = re.search(r"(\d+)$", line.strip())
                 if match:
                     return int(match.group(1))
-    except Exception:
-        return None
+        print(f"smartctl {device}: no temperature line found in output", flush=True)
+    except Exception as e:
+        print(f"get_hdd_temp({device}) error: {e}", flush=True)
+    return None
 
 
 def get_disk_usage(path: str) -> dict:
@@ -139,12 +148,13 @@ def get_ram_usage() -> dict:
 
 def get_docker_containers() -> list[dict] | None:
     try:
-        client = docker.from_env()
+        client = docker.DockerClient(base_url=f"unix://{DOCKER_SOCKET}")
         return [
             {"name": c.name, "running": c.status == "running"}
             for c in client.containers.list(all=True)
         ]
-    except Exception:
+    except Exception as e:
+        print(f"get_docker_containers() error (socket={DOCKER_SOCKET}): {e}", flush=True)
         return None
 
 
