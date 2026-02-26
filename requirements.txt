@@ -2,4 +2,3 @@ requests
 psutil
 python-dotenv
 docker
-python-telegram-bot
