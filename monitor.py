@@ -15,6 +15,8 @@ import docker
 import psutil
 import requests
 from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 load_dotenv()
 
@@ -220,37 +222,22 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
-def poll_commands() -> None:
-    """Long-poll Telegram for bot commands and handle /report."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    offset = None
+async def handle_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if str(update.effective_chat.id) != str(TELEGRAM_CHAT_ID):
+        return
+    now = datetime.now()
+    print(f"[{now}] /report command received via Telegram", flush=True)
+    report, alerts = build_report()
+    await update.message.reply_text(report, parse_mode="Markdown")
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        await update.message.reply_text(alert_msg, parse_mode="Markdown")
 
-    while True:
-        try:
-            params = {"timeout": 30, "allowed_updates": ["message"]}
-            if offset is not None:
-                params["offset"] = offset
-            resp = requests.get(url, params=params, timeout=40)
-            updates = resp.json().get("result", [])
-        except Exception:
-            time.sleep(5)
-            continue
 
-        for update in updates:
-            offset = update["update_id"] + 1
-            msg = update.get("message", {})
-            chat_id = str(msg.get("chat", {}).get("id", ""))
-            text = msg.get("text", "")
-
-            if chat_id != str(TELEGRAM_CHAT_ID):
-                continue
-
-            if text.startswith("/report"):
-                now = datetime.now()
-                print(f"[{now}] /report command received via Telegram", flush=True)
-                report, alerts = build_report()
-                send_telegram(report)
-                send_alerts(alerts)
+def start_bot() -> None:
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("report", handle_report_command))
+    app.run_polling()
 
 
 def run_daemon() -> None:
@@ -258,7 +245,7 @@ def run_daemon() -> None:
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
-    threading.Thread(target=poll_commands, daemon=True).start()
+    threading.Thread(target=start_bot, daemon=True).start()
     now = datetime.now()
     print(f"[{now}] Sending startup report", flush=True)
     report, alerts = build_report()
