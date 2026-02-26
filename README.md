@@ -34,7 +34,36 @@ Fill in your Telegram bot token and chat ID.
 python3 monitor.py
 ```
 
-### 4. Set up cron jobs
+### 4a. Run with Docker (recommended)
+
+Add a `nas-monitor` service to your `docker-compose.yml`:
+
+```yaml
+nas-monitor:
+  build: /opt/fourmiliere_bot
+  restart: unless-stopped
+  env_file: /opt/fourmiliere_bot/.env
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /mnt/movies:/mnt/movies:ro
+    - /mnt/tv:/mnt/tv:ro
+  devices:
+    - /dev/nvme0:/dev/nvme0
+    - /dev/sda:/dev/sda
+    - /dev/sdb:/dev/sdb
+  cap_add:
+    - SYS_RAWIO
+```
+
+Then start it:
+
+```bash
+docker compose up -d --build nas-monitor
+```
+
+The container runs in daemon mode: daily report at 8am, alert checks every 15 minutes.
+
+### 4b. Set up cron jobs (alternative)
 
 ```bash
 crontab -e
@@ -44,10 +73,10 @@ Add these lines:
 
 ```
 # Daily report at 8am
-0 8 * * * cd /opt/nas-monitor && python3 monitor.py
+0 8 * * * cd /opt/fourmiliere_bot && python3 monitor.py
 
 # Alert check every 15 minutes
-*/15 * * * * cd /opt/nas-monitor && python3 monitor.py --alert-only
+*/15 * * * * cd /opt/fourmiliere_bot && python3 monitor.py --alert-only
 ```
 
 ## Thresholds
@@ -64,9 +93,12 @@ You can adjust thresholds in the `THRESHOLDS` dict in `monitor.py`.
 ## Usage
 
 ```bash
-# Send full daily report
+# Send full daily report now
 python3 monitor.py
 
 # Only send message if thresholds are crossed
 python3 monitor.py --alert-only
+
+# Run as long-lived daemon (used by Docker)
+python3 monitor.py --daemon
 ```

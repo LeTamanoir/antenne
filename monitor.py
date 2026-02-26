@@ -197,23 +197,60 @@ def build_report() -> tuple[str, list[str]]:
     return "\n".join(lines), alerts
 
 
+def send_alerts(alerts: list[str]) -> None:
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        send_telegram(alert_msg)
+
+
+def run_daemon() -> None:
+    import time
+
+    last_alert_ts = 0.0
+    last_daily_date = None
+
+    print("NAS Monitor daemon started", flush=True)
+
+    while True:
+        now = datetime.now()
+
+        # Daily report at 8am
+        if now.hour == 8 and last_daily_date != now.date():
+            print(f"[{now}] Sending daily report", flush=True)
+            report, alerts = build_report()
+            send_telegram(report)
+            send_alerts(alerts)
+            last_daily_date = now.date()
+
+        # Alert check every 15 minutes
+        if time.time() - last_alert_ts >= 15 * 60:
+            print(f"[{now}] Running alert check", flush=True)
+            _, alerts = build_report()
+            send_alerts(alerts)
+            last_alert_ts = time.time()
+
+        time.sleep(60)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--alert-only", action="store_true",
                         help="Only send message if thresholds are crossed")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run as daemon: daily report at 8am, alerts every 15 min")
     args = parser.parse_args()
+
+    if args.daemon:
+        run_daemon()
+        return
 
     report, alerts = build_report()
 
     if args.alert_only:
-        if alerts:
-            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-            send_telegram(alert_msg)
+        send_alerts(alerts)
     else:
         send_telegram(report)
-        if alerts:
-            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-            send_telegram(alert_msg)
+        send_alerts(alerts)
 
 
 if __name__ == "__main__":
