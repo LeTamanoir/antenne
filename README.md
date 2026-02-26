@@ -20,13 +20,13 @@ cp .env.example .env
 nano .env
 ```
 
-Fill in your Telegram bot token and chat ID.
+Fill in your Telegram bot token and chat ID. All other values have sensible defaults but can be overridden — see `.env.example` for the full list.
 
 ### 2. Add the service to your `docker-compose.yml`
 
 ```yaml
 nas-monitor:
-  build: /opt/fourmiliere_bot
+  image: ghcr.io/letamanoir/fourmiliere_bot:latest
   restart: unless-stopped
   env_file: /opt/fourmiliere_bot/.env
   volumes:
@@ -44,18 +44,29 @@ nas-monitor:
 ### 3. Start it
 
 ```bash
-docker compose up -d --build nas-monitor
+docker compose up -d nas-monitor
 ```
 
-The container runs as a daemon: daily report at 8am, alert checks every 15 minutes.
+The container runs as a daemon: daily report at 8am, alert checks every 15 minutes (both configurable via env vars).
 
-## Thresholds
+## Configuration
 
-| Metric | Warning | Critical |
-|--------|---------|----------|
-| NVMe temp | 70°C | 80°C |
-| HDD temp | 45°C | 50°C |
-| Disk usage | 80% | 90% |
-| RAM usage | 85% | - |
+All values are configurable via environment variables. Copy `.env.example` to `.env` and adjust as needed.
 
-You can adjust thresholds in the `THRESHOLDS` dict in `monitor.py`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_TOKEN` | — | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
+| `NVME_DEVICE` | `/dev/nvme0` | NVMe device path |
+| `NVME_LABEL` | `NVMe` | Label shown in reports |
+| `HDD_DEVICES` | `/dev/sda:HDD sda,/dev/sdb:HDD sdb` | Comma-separated `device:label` pairs |
+| `DISK_MOUNTS` | `/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk` | Comma-separated `path:label` pairs |
+| `NVME_WARN_TEMP` | `70` | NVMe warning threshold (°C) |
+| `NVME_CRIT_TEMP` | `80` | NVMe critical threshold (°C) |
+| `HDD_WARN_TEMP` | `45` | HDD warning threshold (°C) |
+| `HDD_CRIT_TEMP` | `50` | HDD critical threshold (°C) |
+| `DISK_WARN_PERCENT` | `80` | Disk usage warning threshold (%) |
+| `DISK_CRIT_PERCENT` | `90` | Disk usage critical threshold (%) |
+| `RAM_WARN_PERCENT` | `85` | RAM usage warning threshold (%) |
+| `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
+| `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |
