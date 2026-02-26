@@ -4,15 +4,22 @@ Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
 import os
+import io
+import re
+import sqlite3
 import signal
 import telebot
 from pySMART import Device
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psutil
 from dotenv import load_dotenv
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 load_dotenv()
 
@@ -64,6 +71,8 @@ REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no
 REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
 REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
+DB_PATH = os.getenv("DB_PATH", "/app/data/antenne.db")
+DEFAULT_GRAPH_DURATION = os.getenv("DEFAULT_GRAPH_DURATION", "24h")
 
 
 def send_telegram(message: str) -> None:
@@ -72,6 +81,12 @@ def send_telegram(message: str) -> None:
     except Exception as e:
         print(f"Failed to send Telegram message: {e}", flush=True)
 
+
+def send_telegram_photo(photo: io.BytesIO) -> None:
+    try:
+        bot.send_photo(TELEGRAM_CHAT_ID, photo)
+    except Exception as e:
+        print(f"Failed to send Telegram photo: {e}", flush=True)
 
 def get_nvme_temp(device: str) -> int | None:
     try:
@@ -113,6 +128,182 @@ def get_ram_usage() -> dict:
         "used": mem.used / (1024 ** 3),
         "percent": mem.percent,
     }
+
+
+def init_db() -> None:
+    """Create metrics table if it doesn't exist."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS metrics (
+            timestamp TEXT NOT NULL,
+            metric_name TEXT NOT NULL,
+            metric_value REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics (timestamp)
+    """)
+    conn.commit()
+    conn.close()
+
+
+def store_metrics() -> None:
+    """Collect and store current metrics in SQLite."""
+    now = datetime.now().isoformat()
+    rows = []
+
+    # CPU
+    cpu_percent = psutil.cpu_percent(interval=1)
+    rows.append((now, "cpu_percent", cpu_percent))
+
+    # RAM
+    ram = get_ram_usage()
+    rows.append((now, "ram_percent", ram["percent"]))
+
+    # NVMe temps
+    for device, label in NVME_DEVICES:
+        temp = get_nvme_temp(device)
+        if temp is not None:
+            rows.append((now, f"temp_{label}", float(temp)))
+
+    # HDD temps
+    for device, label in HDD_DEVICES:
+        temp = get_hdd_temp(device)
+        if temp is not None:
+            rows.append((now, f"temp_{label}", float(temp)))
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.executemany(
+            "INSERT INTO metrics (timestamp, metric_name, metric_value) VALUES (?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"store_metrics() error: {e}", flush=True)
+
+
+def query_metrics(metric_name: str, duration: timedelta) -> list[tuple[datetime, float]]:
+    """Query metrics for a given name and time window."""
+    since = (datetime.now() - duration).isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT timestamp, metric_value FROM metrics WHERE metric_name = ? AND timestamp >= ? ORDER BY timestamp",
+            (metric_name, since),
+        ).fetchall()
+        conn.close()
+        return [(datetime.fromisoformat(ts), val) for ts, val in rows]
+    except Exception as e:
+        print(f"query_metrics() error: {e}", flush=True)
+        return []
+
+
+def parse_duration(text: str) -> timedelta:
+    """Parse duration string like '24h', '7d', '30m' into timedelta."""
+    text = text.strip().lower()
+    match = re.match(r"^(\d+)\s*([hdm])$", text)
+    if match:
+        value = int(match.group(1))
+        unit = match.group(2)
+        if unit == "h":
+            return timedelta(hours=value)
+        elif unit == "d":
+            return timedelta(days=value)
+        elif unit == "m":
+            return timedelta(minutes=value)
+    return timedelta(hours=24)
+
+
+def cleanup_old_metrics(max_age_days: int = 30) -> None:
+    """Delete metrics older than max_age_days."""
+    cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"cleanup_old_metrics() error: {e}", flush=True)
+
+
+def generate_graphs(duration: timedelta) -> list[io.BytesIO]:
+    """Generate matplotlib graphs for the given duration. Returns list of PNG buffers."""
+    graphs = []
+    duration_label = _format_duration(duration)
+
+    # Graph 1: CPU & RAM usage
+    cpu_data = query_metrics("cpu_percent", duration)
+    ram_data = query_metrics("ram_percent", duration)
+    if cpu_data or ram_data:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        if cpu_data:
+            times, values = zip(*cpu_data)
+            ax.plot(times, values, label="CPU %", color="#3498db", linewidth=1.5)
+        if ram_data:
+            times, values = zip(*ram_data)
+            ax.plot(times, values, label="RAM %", color="#e74c3c", linewidth=1.5)
+        ax.set_ylabel("%")
+        ax.set_title(f"CPU & RAM Usage ({duration_label})")
+        ax.legend()
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100)
+        buf.seek(0)
+        graphs.append(buf)
+        plt.close(fig)
+
+    # Graph 2: Disk temperatures
+    temp_metrics = []
+    for _, label in NVME_DEVICES:
+        temp_metrics.append((f"temp_{label}", label))
+    for _, label in HDD_DEVICES:
+        temp_metrics.append((f"temp_{label}", label))
+
+    has_temp_data = False
+    fig, ax = plt.subplots(figsize=(10, 4))
+    colors = ["#2ecc71", "#e67e22", "#9b59b6", "#1abc9c", "#e74c3c"]
+    for i, (metric_name, label) in enumerate(temp_metrics):
+        data = query_metrics(metric_name, duration)
+        if data:
+            has_temp_data = True
+            times, values = zip(*data)
+            ax.plot(times, values, label=label, color=colors[i % len(colors)], linewidth=1.5)
+
+    if has_temp_data:
+        ax.set_ylabel("°C")
+        ax.set_title(f"Disk Temperatures ({duration_label})")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100)
+        buf.seek(0)
+        graphs.append(buf)
+    plt.close(fig)
+
+    return graphs
+
+
+def _format_duration(duration: timedelta) -> str:
+    """Format timedelta as human-readable string."""
+    total_seconds = int(duration.total_seconds())
+    if total_seconds >= 86400:
+        days = total_seconds // 86400
+        return f"{days}d"
+    elif total_seconds >= 3600:
+        hours = total_seconds // 3600
+        return f"{hours}h"
+    else:
+        minutes = total_seconds // 60
+        return f"{minutes}m"
 
 
 def temp_emoji(temp: int, warn: int, crit: int) -> str:
@@ -217,9 +408,30 @@ def handle_report_command(message):
         send_telegram(alert_msg)
 
 
+@bot.message_handler(commands=["graphs"])
+def handle_graphs_command(message):
+    chat_id = str(message.chat.id)
+    if chat_id != str(TELEGRAM_CHAT_ID):
+        return
+    now = datetime.now()
+    # Parse optional duration argument: /graphs 7d, /graphs 24h, etc.
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) > 1:
+        duration = parse_duration(parts[1])
+    else:
+        duration = parse_duration(DEFAULT_GRAPH_DURATION)
+    print(f"[{now}] /graphs command received ({_format_duration(duration)})", flush=True)
+    graphs = generate_graphs(duration)
+    if graphs:
+        for graph in graphs:
+            send_telegram_photo(graph)
+    else:
+        send_telegram("No graph data available yet.")
+
 def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
+    init_db()
 
     print("Antenne daemon started", flush=True)
 
@@ -244,6 +456,7 @@ def run_daemon() -> None:
     report, alerts = build_report()
     send_telegram(report)
     send_alerts(alerts)
+    store_metrics()
 
     while not stop_event.is_set():
         now = datetime.now()
@@ -254,6 +467,9 @@ def run_daemon() -> None:
             report, alerts = build_report()
             send_telegram(report)
             send_alerts(alerts)
+            graphs = generate_graphs(timedelta(hours=24))
+            for graph in graphs:
+                send_telegram_photo(graph)
             last_daily_date = now.date()
 
         # Alert check at configured interval
@@ -262,6 +478,8 @@ def run_daemon() -> None:
             _, alerts = build_report()
             send_alerts(alerts)
             last_alert_ts = time.time()
+            store_metrics()
+            cleanup_old_metrics()
 
         stop_event.wait(60)
 

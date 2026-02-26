@@ -11,6 +11,7 @@ A Python daemon that monitors the host and sends daily reports + threshold alert
 - 📅 Daily digest report at a configurable time (default 8:00)
 - 📩 Immediate report on daemon startup
 - 📬 On-demand report via `/report` Telegram command
+- 📊 Historical graphs (CPU, RAM, disk temps) via `/graphs` command
 
 ## Setup
 
@@ -26,6 +27,7 @@ antenne:
   restart: unless-stopped
   env_file: /opt/antenne/.env
   volumes:
+    - antenne-data:/app/data
     - /mnt/movies:/mnt/movies:ro
     - /mnt/tv:/mnt/tv:ro
   devices:
@@ -35,6 +37,9 @@ antenne:
   cap_add:
     - SYS_RAWIO
     - SYS_ADMIN
+
+volumes:
+  antenne-data:
 ```
 ### 3. Start it
 
@@ -42,7 +47,7 @@ antenne:
 docker compose up -d antenne
 ```
 
-The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report by sending `/report` in the Telegram chat.
+The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report by sending `/report` or request historical graphs with `/graphs` (accepts optional duration like `/graphs 7d`, `/graphs 24h`).
 
 ## Configuration
 
@@ -69,3 +74,5 @@ All values are configurable via environment variables.
 | `REPORT_HDD` | `true` | Include HDD temperatures in the report |
 | `REPORT_DISK` | `true` | Include disk usage in the report |
 | `REPORT_RAM` | `true` | Include RAM usage in the report |
+| `DB_PATH` | `/app/data/antenne.db` | Path to SQLite database for metrics history |
+| `DEFAULT_GRAPH_DURATION` | `24h` | Default time window for graphs (e.g. `24h`, `7d`, `30m`) |

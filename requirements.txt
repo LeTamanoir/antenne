@@ -2,3 +2,4 @@ pyTelegramBotAPI
 psutil
 python-dotenv
 pySMART
+matplotlib
