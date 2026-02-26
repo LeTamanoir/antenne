@@ -1,6 +1,6 @@
-# NAS Monitor
+# Antenne
 
-A simple Python script that monitors your NAS and sends daily reports + threshold alerts via Telegram.
+A Python daemon for [fourmilière](https://github.com/LeTamanoir/antenne) that monitors the host and sends daily reports + threshold alerts via Telegram.
 
 ## Features
 
@@ -9,64 +9,63 @@ A simple Python script that monitors your NAS and sends daily reports + threshol
 - 🧠 RAM usage
 - 🐳 Docker container status
 - ⚠️ Instant alerts when thresholds are crossed
-- 📅 Daily digest report
+- 📅 Daily digest report at 8am
 
 ## Setup
 
-### 1. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
+### 1. Configure environment
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Fill in your Telegram bot token and chat ID.
+Fill in your Telegram bot token and chat ID. All other values have sensible defaults but can be overridden — see `.env.example` for the full list.
 
-### 3. Test it
+### 2. Add the service to your `docker-compose.yml`
+
+```yaml
+antenne:
+  image: ghcr.io/letamanoir/antenne:latest
+  restart: unless-stopped
+  env_file: /opt/fourmiliere_bot/.env
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /mnt/movies:/mnt/movies:ro
+    - /mnt/tv:/mnt/tv:ro
+  devices:
+    - /dev/nvme0:/dev/nvme0
+    - /dev/sda:/dev/sda
+    - /dev/sdb:/dev/sdb
+  cap_add:
+    - SYS_RAWIO
+```
+
+### 3. Start it
 
 ```bash
-python3 monitor.py
+docker compose up -d antenne
 ```
 
-### 4. Set up cron jobs
+The container runs as a daemon: daily report at 8am, alert checks every 15 minutes (both configurable via env vars).
 
-```bash
-crontab -e
-```
+## Configuration
 
-Add these lines:
+All values are configurable via environment variables. Copy `.env.example` to `.env` and adjust as needed.
 
-```
-# Daily report at 8am
-0 8 * * * cd /opt/nas-monitor && python3 monitor.py
-
-# Alert check every 15 minutes
-*/15 * * * * cd /opt/nas-monitor && python3 monitor.py --alert-only
-```
-
-## Thresholds
-
-| Metric | Warning | Critical |
-|--------|---------|----------|
-| NVMe temp | 70°C | 80°C |
-| HDD temp | 45°C | 50°C |
-| Disk usage | 80% | 90% |
-| RAM usage | 85% | - |
-
-You can adjust thresholds in the `THRESHOLDS` dict in `monitor.py`.
-
-## Usage
-
-```bash
-# Send full daily report
-python3 monitor.py
-
-# Only send message if thresholds are crossed
-python3 monitor.py --alert-only
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_TOKEN` | — | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
+| `NVME_DEVICES` | `/dev/nvme0:NVMe` | Comma-separated `device:label` pairs |
+| `HDD_DEVICES` | `/dev/sda:HDD sda,/dev/sdb:HDD sdb` | Comma-separated `device:label` pairs |
+| `DISK_MOUNTS` | `/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk` | Comma-separated `path:label` pairs |
+| `NVME_WARN_TEMP` | `70` | NVMe warning threshold (°C) |
+| `NVME_CRIT_TEMP` | `80` | NVMe critical threshold (°C) |
+| `HDD_WARN_TEMP` | `45` | HDD warning threshold (°C) |
+| `HDD_CRIT_TEMP` | `50` | HDD critical threshold (°C) |
+| `DISK_WARN_PERCENT` | `80` | Disk usage warning threshold (%) |
+| `DISK_CRIT_PERCENT` | `90` | Disk usage critical threshold (%) |
+| `RAM_WARN_PERCENT` | `85` | RAM usage warning threshold (%) |
+| `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
+| `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |

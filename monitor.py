@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-NAS Monitor - Sends daily reports and threshold alerts via Telegram.
+Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
 import os
 import subprocess
 import re
 import argparse
+import time
 from datetime import datetime
 
 import psutil
@@ -18,16 +19,42 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Device config
+def _parse_device_pairs(env_val: str) -> list[tuple[str, str]]:
+    """Parse 'device:label,device:label' env var into list of (device, label) tuples."""
+    pairs = []
+    for item in env_val.split(","):
+        item = item.strip()
+        if ":" in item:
+            device, label = item.split(":", 1)
+            pairs.append((device.strip(), label.strip()))
+    return pairs
+
+
+NVME_DEVICES = _parse_device_pairs(
+    os.getenv("NVME_DEVICES", "/dev/nvme0:NVMe")
+)
+HDD_DEVICES = _parse_device_pairs(
+    os.getenv("HDD_DEVICES", "/dev/sda:HDD sda,/dev/sdb:HDD sdb")
+)
+DISK_MOUNTS = _parse_device_pairs(
+    os.getenv("DISK_MOUNTS", "/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk")
+)
+
 # Thresholds
 THRESHOLDS = {
-    "nvme_warn": 70,
-    "nvme_crit": 80,
-    "hdd_warn": 45,
-    "hdd_crit": 50,
-    "disk_warn": 80,
-    "disk_crit": 90,
-    "ram_warn": 85,
+    "nvme_warn": int(os.getenv("NVME_WARN_TEMP", "70")),
+    "nvme_crit": int(os.getenv("NVME_CRIT_TEMP", "80")),
+    "hdd_warn": int(os.getenv("HDD_WARN_TEMP", "45")),
+    "hdd_crit": int(os.getenv("HDD_CRIT_TEMP", "50")),
+    "disk_warn": int(os.getenv("DISK_WARN_PERCENT", "80")),
+    "disk_crit": int(os.getenv("DISK_CRIT_PERCENT", "90")),
+    "ram_warn": int(os.getenv("RAM_WARN_PERCENT", "85")),
 }
+
+# Daemon config
+REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
+ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
 
 
 def send_telegram(message: str) -> None:
@@ -39,10 +66,10 @@ def send_telegram(message: str) -> None:
     })
 
 
-def get_nvme_temp() -> int | None:
+def get_nvme_temp(device: str) -> int | None:
     try:
         out = subprocess.check_output(
-            ["smartctl", "-a", "/dev/nvme0"], text=True
+            ["smartctl", "-a", device], text=True
         )
         for line in out.splitlines():
             if "Temperature:" in line and "Sensor" not in line:
@@ -70,7 +97,6 @@ def get_disk_usage(path: str) -> dict:
     return {
         "total": usage.total // (1024 ** 3),
         "used": usage.used // (1024 ** 3),
-        "free": usage.free // (1024 ** 3),
         "percent": usage.percent,
     }
 
@@ -96,7 +122,6 @@ def get_docker_containers() -> list[dict]:
             containers.append({
                 "name": name,
                 "running": status.startswith("Up"),
-                "status": status,
             })
         return containers
     except Exception:
@@ -124,23 +149,24 @@ def build_report() -> tuple[str, list[str]]:
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    lines.append(f"🖥️ *NAS Monitor Report*")
+    lines.append(f"🐜 *Antenne*")
     lines.append(f"📅 {now}\n")
 
-    # NVMe
-    nvme_temp = get_nvme_temp()
-    if nvme_temp is not None:
-        emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
-        lines.append(f"💾 *NVMe (Samsung 980):* {emoji} {nvme_temp}°C")
-        if nvme_temp >= THRESHOLDS["nvme_crit"]:
-            alerts.append(f"🔴 CRITICAL: NVMe temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
-        elif nvme_temp >= THRESHOLDS["nvme_warn"]:
-            alerts.append(f"🟡 WARNING: NVMe temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
-    else:
-        lines.append("💾 *NVMe:* ❓ Unable to read")
+    # NVMe drives
+    for device, label in NVME_DEVICES:
+        nvme_temp = get_nvme_temp(device)
+        if nvme_temp is not None:
+            emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
+            lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
+            if nvme_temp >= THRESHOLDS["nvme_crit"]:
+                alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
+            elif nvme_temp >= THRESHOLDS["nvme_warn"]:
+                alerts.append(f"🟡 WARNING: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
+        else:
+            lines.append(f"💾 *{label}:* ❓ Unable to read")
 
     # HDDs
-    for device, label in [("/dev/sda", "HDD Movies (sda)"), ("/dev/sdb", "HDD TV (sdb)")]:
+    for device, label in HDD_DEVICES:
         temp = get_hdd_temp(device)
         if temp is not None:
             emoji = temp_emoji(temp, THRESHOLDS["hdd_warn"], THRESHOLDS["hdd_crit"])
@@ -155,11 +181,7 @@ def build_report() -> tuple[str, list[str]]:
     lines.append("")
 
     # Disk usage
-    for path, label in [
-        ("/mnt/movies", "Movies Drive"),
-        ("/mnt/tv", "TV Drive"),
-        ("/", "System Disk"),
-    ]:
+    for path, label in DISK_MOUNTS:
         try:
             usage = get_disk_usage(path)
             emoji = disk_emoji(usage["percent"])
@@ -197,23 +219,58 @@ def build_report() -> tuple[str, list[str]]:
     return "\n".join(lines), alerts
 
 
+def send_alerts(alerts: list[str]) -> None:
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        send_telegram(alert_msg)
+
+
+def run_daemon() -> None:
+    last_alert_ts = 0.0
+    last_daily_date = None
+
+    print("Antenne daemon started", flush=True)
+
+    while True:
+        now = datetime.now()
+
+        # Daily report at configured hour
+        if now.hour == REPORT_HOUR and last_daily_date != now.date():
+            print(f"[{now}] Sending daily report", flush=True)
+            report, alerts = build_report()
+            send_telegram(report)
+            send_alerts(alerts)
+            last_daily_date = now.date()
+
+        # Alert check at configured interval
+        if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
+            print(f"[{now}] Running alert check", flush=True)
+            _, alerts = build_report()
+            send_alerts(alerts)
+            last_alert_ts = time.time()
+
+        time.sleep(60)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--alert-only", action="store_true",
                         help="Only send message if thresholds are crossed")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run as daemon: daily report, alerts at configured intervals")
     args = parser.parse_args()
+
+    if args.daemon:
+        run_daemon()
+        return
 
     report, alerts = build_report()
 
     if args.alert_only:
-        if alerts:
-            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-            send_telegram(alert_msg)
+        send_alerts(alerts)
     else:
         send_telegram(report)
-        if alerts:
-            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-            send_telegram(alert_msg)
+        send_alerts(alerts)
 
 
 if __name__ == "__main__":
