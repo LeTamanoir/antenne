@@ -4,6 +4,7 @@ Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
 import os
+import signal
 import subprocess
 import re
 import argparse
@@ -286,6 +287,14 @@ def run_daemon() -> None:
     print("Antenne daemon started", flush=True)
 
     stop_event = threading.Event()
+
+    def _handle_signal(signum, frame):
+        print(f"Received signal {signum}, shutting down...", flush=True)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
     poll_thread = threading.Thread(
         target=poll_telegram_commands, args=(stop_event,), daemon=True
     )
@@ -297,28 +306,29 @@ def run_daemon() -> None:
     send_telegram(report)
     send_alerts(alerts)
 
-    try:
-        while True:
-            now = datetime.now()
+    while not stop_event.is_set():
+        now = datetime.now()
 
-            # Daily report at configured hour and minute
-            if now.hour == REPORT_HOUR and now.minute == REPORT_MINUTE and last_daily_date != now.date():
-                print(f"[{now}] Sending daily report", flush=True)
-                report, alerts = build_report()
-                send_telegram(report)
-                send_alerts(alerts)
-                last_daily_date = now.date()
+        # Daily report at configured hour and minute
+        if now.hour == REPORT_HOUR and now.minute == REPORT_MINUTE and last_daily_date != now.date():
+            print(f"[{now}] Sending daily report", flush=True)
+            report, alerts = build_report()
+            send_telegram(report)
+            send_alerts(alerts)
+            last_daily_date = now.date()
 
-            # Alert check at configured interval
-            if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
-                print(f"[{now}] Running alert check", flush=True)
-                _, alerts = build_report()
-                send_alerts(alerts)
-                last_alert_ts = time.time()
+        # Alert check at configured interval
+        if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
+            print(f"[{now}] Running alert check", flush=True)
+            _, alerts = build_report()
+            send_alerts(alerts)
+            last_alert_ts = time.time()
 
-            time.sleep(60)
-    except KeyboardInterrupt:
-        stop_event.set()
+        stop_event.wait(60)
+
+    print("Antenne daemon shutting down...", flush=True)
+    poll_thread.join(timeout=5)
+    print("Antenne daemon stopped", flush=True)
 
 
 def main():
