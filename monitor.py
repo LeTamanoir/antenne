@@ -3,20 +3,18 @@
 Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
-import asyncio
 import os
 import subprocess
 import re
 import argparse
 import time
+import threading
 from datetime import datetime
 
 import docker
 import psutil
 import requests
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
 
 load_dotenv()
 
@@ -234,37 +232,58 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
-async def handle_report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if str(update.effective_chat.id) != str(TELEGRAM_CHAT_ID):
-        return
-    now = datetime.now()
-    print(f"[{now}] /report command received via Telegram", flush=True)
-    report, alerts = build_report()
-    await update.message.reply_text(report, parse_mode="Markdown")
-    if alerts:
-        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-        await update.message.reply_text(alert_msg, parse_mode="Markdown")
+def poll_telegram_commands(stop_event: threading.Event) -> None:
+    """Poll Telegram for /report commands using long-polling and respond synchronously."""
+    offset = None
+    while not stop_event.is_set():
+        try:
+            params: dict = {"timeout": 30, "allowed_updates": ["message"]}
+            if offset is not None:
+                params["offset"] = offset
+            resp = requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+                params=params,
+                timeout=35,
+            )
+            data = resp.json()
+            if data.get("ok"):
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    msg = update.get("message", {})
+                    chat_id = str(msg.get("chat", {}).get("id", ""))
+                    text = msg.get("text", "")
+                    if chat_id == str(TELEGRAM_CHAT_ID) and text.startswith("/report"):
+                        now = datetime.now()
+                        print(f"[{now}] /report command received via Telegram", flush=True)
+                        report, alerts = build_report()
+                        send_telegram(report)
+                        if alerts:
+                            alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+                            send_telegram(alert_msg)
+        except Exception as e:
+            print(f"Telegram polling error: {e}", flush=True)
+            stop_event.wait(10)
 
 
-async def run_daemon() -> None:
+def run_daemon() -> None:
     last_alert_ts = 0.0
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
 
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("report", handle_report_command))
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=poll_telegram_commands, args=(stop_event,), daemon=True
+    )
+    poll_thread.start()
 
-    async with app:
-        await app.start()
-        await app.updater.start_polling()
+    now = datetime.now()
+    print(f"[{now}] Sending startup report", flush=True)
+    report, alerts = build_report()
+    send_telegram(report)
+    send_alerts(alerts)
 
-        now = datetime.now()
-        print(f"[{now}] Sending startup report", flush=True)
-        report, alerts = build_report()
-        send_telegram(report)
-        send_alerts(alerts)
-
+    try:
         while True:
             now = datetime.now()
 
@@ -283,10 +302,9 @@ async def run_daemon() -> None:
                 send_alerts(alerts)
                 last_alert_ts = time.time()
 
-            await asyncio.sleep(60)
-
-        await app.updater.stop()
-        await app.stop()
+            time.sleep(60)
+    except KeyboardInterrupt:
+        stop_event.set()
 
 
 def main():
@@ -298,7 +316,7 @@ def main():
     args = parser.parse_args()
 
     if args.daemon:
-        asyncio.run(run_daemon())
+        run_daemon()
         return
 
     report, alerts = build_report()
