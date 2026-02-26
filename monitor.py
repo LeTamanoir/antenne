@@ -109,8 +109,8 @@ def get_disk_usage(path: str) -> dict:
 def get_ram_usage() -> dict:
     mem = psutil.virtual_memory()
     return {
-        "total": mem.total // (1024 ** 3),
-        "used": mem.used // (1024 ** 3),
+        "total": mem.total / (1024 ** 3),
+        "used": mem.used / (1024 ** 3),
         "percent": mem.percent,
     }
 
@@ -189,7 +189,7 @@ def build_report() -> tuple[str, list[str]]:
     if REPORT_RAM:
         ram = get_ram_usage()
         emoji = "🔴" if ram["percent"] >= THRESHOLDS["ram_warn"] else "🟢"
-        lines.append(f"🧠 *RAM:* {emoji} {ram['used']}GB / {ram['total']}GB ({ram['percent']}%)")
+        lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%)")
         if ram["percent"] >= THRESHOLDS["ram_warn"]:
             alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
         lines.append("")
