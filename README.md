@@ -10,8 +10,7 @@ A Python daemon that monitors the host and sends daily reports + threshold alert
 - ⚠️ Instant alerts when thresholds are crossed
 - 📅 Daily digest report at a configurable time (default 8:00)
 - 📩 Immediate report on daemon startup
-- 📬 On-demand report via `/report` Telegram command
-- 📊 Historical graphs (CPU, RAM, disk temps) via `/graphs` command
+- 📬 On-demand report with graphs via `/report` command (accepts optional duration like `/report 7d`)
 
 ## Setup
 
@@ -47,7 +46,7 @@ volumes:
 docker compose up -d antenne
 ```
 
-The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report by sending `/report` or request historical graphs with `/graphs` (accepts optional duration like `/graphs 7d`, `/graphs 24h`).
+The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report with graphs by sending `/report` (accepts optional duration like `/report 7d`, `/report 24h`).
 
 ## Configuration
 

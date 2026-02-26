@@ -216,9 +216,9 @@ def parse_duration(text: str) -> timedelta:
     return timedelta(hours=24)
 
 
-def cleanup_old_metrics(max_age_days: int = 30) -> None:
-    """Delete metrics older than max_age_days."""
-    cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+def cleanup_old_metrics(max_age_hours: int = 48) -> None:
+    """Delete metrics older than max_age_hours."""
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
@@ -400,33 +400,21 @@ def handle_report_command(message):
     if chat_id != str(TELEGRAM_CHAT_ID):
         return
     now = datetime.now()
-    print(f"[{now}] /report command received via Telegram", flush=True)
-    report, alerts = build_report()
-    send_telegram(report)
-    if alerts:
-        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-        send_telegram(alert_msg)
-
-
-@bot.message_handler(commands=["graphs"])
-def handle_graphs_command(message):
-    chat_id = str(message.chat.id)
-    if chat_id != str(TELEGRAM_CHAT_ID):
-        return
-    now = datetime.now()
-    # Parse optional duration argument: /graphs 7d, /graphs 24h, etc.
+    # Parse optional duration argument: /report 7d, /report 24h, etc.
     parts = message.text.strip().split(maxsplit=1)
     if len(parts) > 1:
         duration = parse_duration(parts[1])
     else:
         duration = parse_duration(DEFAULT_GRAPH_DURATION)
-    print(f"[{now}] /graphs command received ({_format_duration(duration)})", flush=True)
+    print(f"[{now}] /report command received ({_format_duration(duration)})", flush=True)
+    report, alerts = build_report()
+    send_telegram(report)
+    if alerts:
+        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
+        send_telegram(alert_msg)
     graphs = generate_graphs(duration)
-    if graphs:
-        for graph in graphs:
-            send_telegram_photo(graph)
-    else:
-        send_telegram("No graph data available yet.")
+    for graph in graphs:
+        send_telegram_photo(graph)
 
 def run_daemon() -> None:
     last_alert_ts = 0.0
