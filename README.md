@@ -1,6 +1,6 @@
 # Antenne
 
-A Python daemon for [fourmilière](https://github.com/LeTamanoir/fourmiliere_bot) that monitors the host and sends daily reports + threshold alerts via Telegram.
+A Python daemon for [fourmilière](https://github.com/LeTamanoir/antenne) that monitors the host and sends daily reports + threshold alerts via Telegram.
 
 ## Features
 
@@ -26,7 +26,7 @@ Fill in your Telegram bot token and chat ID. All other values have sensible defa
 
 ```yaml
 antenne:
-  image: ghcr.io/letamanoir/fourmiliere_bot:latest
+  image: ghcr.io/letamanoir/antenne:latest
   restart: unless-stopped
   env_file: /opt/fourmiliere_bot/.env
   volumes:
