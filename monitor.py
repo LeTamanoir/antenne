@@ -10,7 +10,6 @@ import sqlite3
 import signal
 import telebot
 from pySMART import Device
-import time
 import threading
 from datetime import datetime, timedelta
 
@@ -40,26 +39,26 @@ def _parse_device_pairs(env_val: str) -> list[tuple[str, str]]:
     return pairs
 
 
-NVME_DEVICES = _parse_device_pairs(
-    os.getenv("NVME_DEVICES", "/dev/nvme0:NVMe")
-)
-HDD_DEVICES = _parse_device_pairs(
-    os.getenv("HDD_DEVICES", "/dev/sda:HDD sda,/dev/sdb:HDD sdb")
-)
+# Temperature devices: (device, label, emoji, warn_temp, crit_temp)
+_nvme_warn = int(os.getenv("NVME_WARN_TEMP", "70"))
+_nvme_crit = int(os.getenv("NVME_CRIT_TEMP", "80"))
+_hdd_warn = int(os.getenv("HDD_WARN_TEMP", "45"))
+_hdd_crit = int(os.getenv("HDD_CRIT_TEMP", "50"))
+
+TEMP_DEVICES: list[tuple[str, str, str, int, int]] = []
+for _dev, _label in _parse_device_pairs(os.getenv("NVME_DEVICES", "/dev/nvme0:NVMe")):
+    TEMP_DEVICES.append((_dev, _label, "💾", _nvme_warn, _nvme_crit))
+for _dev, _label in _parse_device_pairs(os.getenv("HDD_DEVICES", "/dev/sda:HDD sda,/dev/sdb:HDD sdb")):
+    TEMP_DEVICES.append((_dev, _label, "🗄️", _hdd_warn, _hdd_crit))
+
 DISK_MOUNTS = _parse_device_pairs(
     os.getenv("DISK_MOUNTS", "/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk")
 )
 
 # Thresholds
-THRESHOLDS = {
-    "nvme_warn": int(os.getenv("NVME_WARN_TEMP", "70")),
-    "nvme_crit": int(os.getenv("NVME_CRIT_TEMP", "80")),
-    "hdd_warn": int(os.getenv("HDD_WARN_TEMP", "45")),
-    "hdd_crit": int(os.getenv("HDD_CRIT_TEMP", "50")),
-    "disk_warn": int(os.getenv("DISK_WARN_PERCENT", "80")),
-    "disk_crit": int(os.getenv("DISK_CRIT_PERCENT", "90")),
-    "ram_warn": int(os.getenv("RAM_WARN_PERCENT", "85")),
-}
+DISK_WARN = int(os.getenv("DISK_WARN_PERCENT", "80"))
+DISK_CRIT = int(os.getenv("DISK_CRIT_PERCENT", "90"))
+RAM_WARN = int(os.getenv("RAM_WARN_PERCENT", "85"))
 
 # Daemon config
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
@@ -67,8 +66,7 @@ REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
 METRICS_INTERVAL_SECONDS = int(os.getenv("METRICS_INTERVAL_SECONDS", "10"))
 
 # Report sections
-REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no")
-REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
+REPORT_TEMPS = os.getenv("REPORT_TEMPS", "true").lower() not in ("0", "false", "no")
 REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
 DB_PATH = os.getenv("DB_PATH", "/app/data/antenne.db")
@@ -88,19 +86,7 @@ def send_telegram_photo(photo: io.BytesIO) -> None:
     except Exception as e:
         print(f"Failed to send Telegram photo: {e}", flush=True)
 
-def get_nvme_temp(device: str) -> int | None:
-    try:
-        dev = Device(device)
-        temp = dev.temperature
-        if temp is None:
-            print(f"pySMART {device}: temperature is None (model={dev.model}, interface={dev._interface}, attributes={dev.if_attributes.__dict__ if dev.if_attributes else None})", flush=True)
-        return temp
-    except Exception as e:
-        print(f"get_nvme_temp({device}) error: {e}", flush=True)
-    return None
-
-
-def get_hdd_temp(device: str) -> int | None:
+def get_disk_temp(device: str) -> int | None:
     try:
         dev = Device(device)
         temp = dev.temperature
@@ -108,7 +94,7 @@ def get_hdd_temp(device: str) -> int | None:
             print(f"pySMART {device}: temperature is None (model={dev.model}, interface={dev._interface})", flush=True)
         return temp
     except Exception as e:
-        print(f"get_hdd_temp({device}) error: {e}", flush=True)
+        print(f"get_disk_temp({device}) error: {e}", flush=True)
     return None
 
 
@@ -150,25 +136,11 @@ def init_db() -> None:
 def store_metrics() -> None:
     """Collect and store current metrics in SQLite."""
     now = datetime.now().isoformat()
-    rows = []
+    rows = [(now, "cpu_percent", psutil.cpu_percent(interval=1))]
+    rows.append((now, "ram_percent", get_ram_usage()["percent"]))
 
-    # CPU
-    cpu_percent = psutil.cpu_percent(interval=1)
-    rows.append((now, "cpu_percent", cpu_percent))
-
-    # RAM
-    ram = get_ram_usage()
-    rows.append((now, "ram_percent", ram["percent"]))
-
-    # NVMe temps
-    for device, label in NVME_DEVICES:
-        temp = get_nvme_temp(device)
-        if temp is not None:
-            rows.append((now, f"temp_{label}", float(temp)))
-
-    # HDD temps
-    for device, label in HDD_DEVICES:
-        temp = get_hdd_temp(device)
+    for device, label, _, _, _ in TEMP_DEVICES:
+        temp = get_disk_temp(device)
         if temp is not None:
             rows.append((now, f"temp_{label}", float(temp)))
 
@@ -244,66 +216,60 @@ def cleanup_old_metrics(max_age_hours: int = 48) -> None:
         print(f"cleanup_old_metrics() error: {e}", flush=True)
 
 
-def generate_graphs(duration: timedelta) -> list[io.BytesIO]:
-    """Generate matplotlib graphs for the given duration. Returns list of PNG buffers."""
-    graphs = []
-    duration_label = _format_duration(duration)
+def _setup_chart(title: str, ylabel: str, ylim: tuple | None = None) -> tuple:
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+    if ylim:
+        ax.set_ylim(*ylim)
+    fig.autofmt_xdate()
+    return fig, ax
 
-    # Graph 1: CPU & RAM usage
+
+def _save_chart(fig) -> io.BytesIO:
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+
+def generate_graphs(duration: timedelta) -> list[io.BytesIO]:
+    graphs = []
+    label = _format_duration(duration)
+
+    # CPU & RAM
     cpu_data = query_metrics("cpu_percent", duration)
     ram_data = query_metrics("ram_percent", duration)
     if cpu_data or ram_data:
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = _setup_chart(f"CPU & RAM Usage ({label})", "%", ylim=(0, 100))
         if cpu_data:
             times, values = zip(*cpu_data)
             ax.plot(times, values, label="CPU %", color="#3498db", linewidth=1.5)
         if ram_data:
             times, values = zip(*ram_data)
             ax.plot(times, values, label="RAM %", color="#e74c3c", linewidth=1.5)
-        ax.set_ylabel("%")
-        ax.set_title(f"CPU & RAM Usage ({duration_label})")
         ax.legend()
-        ax.set_ylim(0, 100)
-        ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
-        fig.autofmt_xdate()
-        fig.tight_layout()
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=100)
-        buf.seek(0)
-        graphs.append(buf)
-        plt.close(fig)
+        graphs.append(_save_chart(fig))
 
-    # Graph 2: Disk temperatures
-    temp_metrics = []
-    for _, label in NVME_DEVICES:
-        temp_metrics.append((f"temp_{label}", label))
-    for _, label in HDD_DEVICES:
-        temp_metrics.append((f"temp_{label}", label))
-
-    has_temp_data = False
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # Disk temperatures
     colors = ["#2ecc71", "#e67e22", "#9b59b6", "#1abc9c", "#e74c3c"]
-    for i, (metric_name, label) in enumerate(temp_metrics):
-        data = query_metrics(metric_name, duration)
+    has_data = False
+    fig, ax = _setup_chart(f"Disk Temperatures ({label})", "°C")
+    for i, (_, dev_label, _, _, _) in enumerate(TEMP_DEVICES):
+        data = query_metrics(f"temp_{dev_label}", duration)
         if data:
-            has_temp_data = True
+            has_data = True
             times, values = zip(*data)
-            ax.plot(times, values, label=label, color=colors[i % len(colors)], linewidth=1.5)
-
-    if has_temp_data:
-        ax.set_ylabel("°C")
-        ax.set_title(f"Disk Temperatures ({duration_label})")
+            ax.plot(times, values, label=dev_label, color=colors[i % len(colors)], linewidth=1.5)
+    if has_data:
         ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
-        fig.autofmt_xdate()
-        fig.tight_layout()
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=100)
-        buf.seek(0)
-        graphs.append(buf)
-    plt.close(fig)
+        graphs.append(_save_chart(fig))
+    else:
+        plt.close(fig)
 
     return graphs
 
@@ -322,18 +288,10 @@ def _format_duration(duration: timedelta) -> str:
         return f"{minutes}m"
 
 
-def temp_emoji(temp: int, warn: int, crit: int) -> str:
-    if temp >= crit:
+def _level_emoji(value: float, warn: float, crit: float) -> str:
+    if value >= crit:
         return "🔴"
-    if temp >= warn:
-        return "🟡"
-    return "🟢"
-
-
-def disk_emoji(percent: float) -> str:
-    if percent >= THRESHOLDS["disk_crit"]:
-        return "🔴"
-    if percent >= THRESHOLDS["disk_warn"]:
+    if value >= warn:
         return "🟡"
     return "🟢"
 
@@ -342,48 +300,26 @@ def build_report() -> tuple[str, list[str]]:
     alerts = []
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    avg_duration = timedelta(hours=48)
+    avg_dur = timedelta(hours=48)
 
-    lines.append(f"🐜 *Antenne*")
+    lines.append("🐜 *Antenne*")
     lines.append(f"📅 {now}\n")
 
-    # NVMe drives
-    if REPORT_NVME:
-        for device, label in NVME_DEVICES:
-            nvme_temp = get_nvme_temp(device)
-            if nvme_temp is not None:
-                emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
-                avg = query_metric_avg(f"temp_{label}", avg_duration)
-                if avg is not None:
-                    lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C (avg {avg:.1f}°C)")
-                else:
-                    lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
-                if nvme_temp >= THRESHOLDS["nvme_crit"]:
-                    alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
-                elif nvme_temp >= THRESHOLDS["nvme_warn"]:
-                    alerts.append(f"🟡 WARNING: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
-            else:
-                lines.append(f"💾 *{label}:* ❓ Unable to read")
-
-    # HDDs
-    if REPORT_HDD:
-        for device, label in HDD_DEVICES:
-            temp = get_hdd_temp(device)
+    # Disk temperatures
+    if REPORT_TEMPS:
+        for device, label, icon, warn, crit in TEMP_DEVICES:
+            temp = get_disk_temp(device)
             if temp is not None:
-                emoji = temp_emoji(temp, THRESHOLDS["hdd_warn"], THRESHOLDS["hdd_crit"])
-                avg = query_metric_avg(f"temp_{label}", avg_duration)
-                if avg is not None:
-                    lines.append(f"🗄️ *{label}:* {emoji} {temp}°C (avg {avg:.1f}°C)")
-                else:
-                    lines.append(f"🗄️ *{label}:* {emoji} {temp}°C")
-                if temp >= THRESHOLDS["hdd_crit"]:
-                    alerts.append(f"🔴 CRITICAL: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_crit']}°C)")
-                elif temp >= THRESHOLDS["hdd_warn"]:
-                    alerts.append(f"🟡 WARNING: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_warn']}°C)")
+                emoji = _level_emoji(temp, warn, crit)
+                avg = query_metric_avg(f"temp_{label}", avg_dur)
+                avg_str = f" (avg {avg:.1f}°C)" if avg is not None else ""
+                lines.append(f"{icon} *{label}:* {emoji} {temp}°C{avg_str}")
+                if temp >= crit:
+                    alerts.append(f"🔴 CRITICAL: {label} temp {temp}°C (threshold: {crit}°C)")
+                elif temp >= warn:
+                    alerts.append(f"🟡 WARNING: {label} temp {temp}°C (threshold: {warn}°C)")
             else:
-                lines.append(f"🗄️ *{label}:* ❓ Unable to read")
-
-    if REPORT_NVME or REPORT_HDD:
+                lines.append(f"{icon} *{label}:* ❓ Unable to read")
         lines.append("")
 
     # Disk usage
@@ -391,44 +327,39 @@ def build_report() -> tuple[str, list[str]]:
         for path, label in DISK_MOUNTS:
             try:
                 usage = get_disk_usage(path)
-                emoji = disk_emoji(usage["percent"])
+                emoji = _level_emoji(usage["percent"], DISK_WARN, DISK_CRIT)
                 lines.append(f"📁 *{label}:* {emoji} {usage['used']}GB / {usage['total']}GB ({usage['percent']}%)")
-                if usage["percent"] >= THRESHOLDS["disk_crit"]:
-                    alerts.append(f"🔴 CRITICAL: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_crit']}%)")
-                elif usage["percent"] >= THRESHOLDS["disk_warn"]:
-                    alerts.append(f"🟡 WARNING: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_warn']}%)")
+                if usage["percent"] >= DISK_CRIT:
+                    alerts.append(f"🔴 CRITICAL: {label} usage {usage['percent']}% (threshold: {DISK_CRIT}%)")
+                elif usage["percent"] >= DISK_WARN:
+                    alerts.append(f"🟡 WARNING: {label} usage {usage['percent']}% (threshold: {DISK_WARN}%)")
             except Exception:
                 lines.append(f"📁 *{label}:* ❓ Unable to read")
         lines.append("")
 
     # CPU
-    cpu_percent = psutil.cpu_percent(interval=1)
-    cpu_avg = query_metric_avg("cpu_percent", avg_duration)
-    if cpu_avg is not None:
-        lines.append(f"🖥️ *CPU:* {cpu_percent:.1f}% (avg {cpu_avg:.1f}%)")
-    else:
-        lines.append(f"🖥️ *CPU:* {cpu_percent:.1f}%")
+    cpu = psutil.cpu_percent(interval=1)
+    cpu_avg = query_metric_avg("cpu_percent", avg_dur)
+    avg_str = f" (avg {cpu_avg:.1f}%)" if cpu_avg is not None else ""
+    lines.append(f"🖥️ *CPU:* {cpu:.1f}%{avg_str}")
 
     # RAM
     if REPORT_RAM:
         ram = get_ram_usage()
-        emoji = "🔴" if ram["percent"] >= THRESHOLDS["ram_warn"] else "🟢"
-        ram_avg = query_metric_avg("ram_percent", avg_duration)
-        if ram_avg is not None:
-            lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%, avg {ram_avg:.1f}%)")
-        else:
-            lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%)")
-        if ram["percent"] >= THRESHOLDS["ram_warn"]:
-            alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
-        lines.append("")
+        emoji = _level_emoji(ram["percent"], RAM_WARN, 100)
+        ram_avg = query_metric_avg("ram_percent", avg_dur)
+        avg_str = f", avg {ram_avg:.1f}%" if ram_avg is not None else ""
+        lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%{avg_str})")
+        if ram["percent"] >= RAM_WARN:
+            alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {RAM_WARN}%)")
+    lines.append("")
 
     return "\n".join(lines), alerts
 
 
 def send_alerts(alerts: list[str]) -> None:
     if alerts:
-        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-        send_telegram(alert_msg)
+        send_telegram("⚠️ *NAS Alert!*\n\n" + "\n".join(alerts))
 
 
 @bot.message_handler(commands=["rapport"])
@@ -437,20 +368,13 @@ def handle_report_command(message):
     if chat_id != str(TELEGRAM_CHAT_ID):
         return
     now = datetime.now()
-    # Parse optional duration argument: /report 7d, /report 24h, etc.
     parts = message.text.strip().split(maxsplit=1)
-    if len(parts) > 1:
-        duration = parse_duration(parts[1])
-    else:
-        duration = parse_duration(DEFAULT_GRAPH_DURATION)
-    print(f"[{now}] /report command received ({_format_duration(duration)})", flush=True)
+    duration = parse_duration(parts[1]) if len(parts) > 1 else parse_duration(DEFAULT_GRAPH_DURATION)
+    print(f"[{now}] /rapport command received ({_format_duration(duration)})", flush=True)
     report, alerts = build_report()
     send_telegram(report)
-    if alerts:
-        alert_msg = "⚠️ *NAS Alert!*\n\n" + "\n".join(alerts)
-        send_telegram(alert_msg)
-    graphs = generate_graphs(duration)
-    for graph in graphs:
+    send_alerts(alerts)
+    for graph in generate_graphs(duration):
         send_telegram_photo(graph)
 
 def run_daemon() -> None:
@@ -508,8 +432,6 @@ def run_daemon() -> None:
             for graph in graphs:
                 send_telegram_photo(graph)
             last_daily_date = now.date()
-
-
         stop_event.wait(60)
 
     print("Antenne daemon shutting down...", flush=True)

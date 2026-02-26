@@ -70,8 +70,7 @@ All values are configurable via environment variables.
 | `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
 | `REPORT_MINUTE` | `0` | Minute of the hour for the daily report (0–59) |
 | `METRICS_INTERVAL_SECONDS` | `10` | How often to collect metrics for graphs (seconds) |
-| `REPORT_NVME` | `true` | Include NVMe temperatures in the report |
-| `REPORT_HDD` | `true` | Include HDD temperatures in the report |
+| `REPORT_TEMPS` | `true` | Include disk temperatures in the report |
 | `REPORT_DISK` | `true` | Include disk usage in the report |
 | `REPORT_RAM` | `true` | Include RAM usage in the report |
 | `DB_PATH` | `/app/data/antenne.db` | Path to SQLite database for metrics history |
