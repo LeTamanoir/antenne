@@ -200,6 +200,22 @@ def query_metrics(metric_name: str, duration: timedelta) -> list[tuple[datetime,
         return []
 
 
+def query_metric_avg(metric_name: str, duration: timedelta) -> float | None:
+    """Query average value for a metric over the given time window."""
+    since = (datetime.now() - duration).isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            "SELECT AVG(metric_value) FROM metrics WHERE metric_name = ? AND timestamp >= ?",
+            (metric_name, since),
+        ).fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else None
+    except Exception as e:
+        print(f"query_metric_avg() error: {e}", flush=True)
+        return None
+
+
 def parse_duration(text: str) -> timedelta:
     """Parse duration string like '24h', '7d', '30m' into timedelta."""
     text = text.strip().lower()
@@ -326,6 +342,7 @@ def build_report() -> tuple[str, list[str]]:
     alerts = []
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    avg_duration = timedelta(hours=48)
 
     lines.append(f"🐜 *Antenne*")
     lines.append(f"📅 {now}\n")
@@ -336,7 +353,11 @@ def build_report() -> tuple[str, list[str]]:
             nvme_temp = get_nvme_temp(device)
             if nvme_temp is not None:
                 emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
-                lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
+                avg = query_metric_avg(f"temp_{label}", avg_duration)
+                if avg is not None:
+                    lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C (avg {avg:.1f}°C)")
+                else:
+                    lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
                 if nvme_temp >= THRESHOLDS["nvme_crit"]:
                     alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
                 elif nvme_temp >= THRESHOLDS["nvme_warn"]:
@@ -350,7 +371,11 @@ def build_report() -> tuple[str, list[str]]:
             temp = get_hdd_temp(device)
             if temp is not None:
                 emoji = temp_emoji(temp, THRESHOLDS["hdd_warn"], THRESHOLDS["hdd_crit"])
-                lines.append(f"🗄️ *{label}:* {emoji} {temp}°C")
+                avg = query_metric_avg(f"temp_{label}", avg_duration)
+                if avg is not None:
+                    lines.append(f"🗄️ *{label}:* {emoji} {temp}°C (avg {avg:.1f}°C)")
+                else:
+                    lines.append(f"🗄️ *{label}:* {emoji} {temp}°C")
                 if temp >= THRESHOLDS["hdd_crit"]:
                     alerts.append(f"🔴 CRITICAL: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_crit']}°C)")
                 elif temp >= THRESHOLDS["hdd_warn"]:
@@ -376,11 +401,23 @@ def build_report() -> tuple[str, list[str]]:
                 lines.append(f"📁 *{label}:* ❓ Unable to read")
         lines.append("")
 
+    # CPU
+    cpu_percent = psutil.cpu_percent(interval=1)
+    cpu_avg = query_metric_avg("cpu_percent", avg_duration)
+    if cpu_avg is not None:
+        lines.append(f"🖥️ *CPU:* {cpu_percent:.1f}% (avg {cpu_avg:.1f}%)")
+    else:
+        lines.append(f"🖥️ *CPU:* {cpu_percent:.1f}%")
+
     # RAM
     if REPORT_RAM:
         ram = get_ram_usage()
         emoji = "🔴" if ram["percent"] >= THRESHOLDS["ram_warn"] else "🟢"
-        lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%)")
+        ram_avg = query_metric_avg("ram_percent", avg_duration)
+        if ram_avg is not None:
+            lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%, avg {ram_avg:.1f}%)")
+        else:
+            lines.append(f"🧠 *RAM:* {emoji} {ram['used']:.2f}GB / {ram['total']:.2f}GB ({ram['percent']}%)")
         if ram["percent"] >= THRESHOLDS["ram_warn"]:
             alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
         lines.append("")
