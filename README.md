@@ -63,4 +63,10 @@ All values are configurable via environment variables.
 | `DISK_CRIT_PERCENT` | `90` | Disk usage critical threshold (%) |
 | `RAM_WARN_PERCENT` | `85` | RAM usage warning threshold (%) |
 | `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
+| `REPORT_MINUTE` | `0` | Minute of the hour for the daily report (0–59) |
 | `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |
+| `REPORT_NVME` | `true` | Include NVMe temperatures in the report |
+| `REPORT_HDD` | `true` | Include HDD temperatures in the report |
+| `REPORT_DISK` | `true` | Include disk usage in the report |
+| `REPORT_RAM` | `true` | Include RAM usage in the report |
+| `REPORT_DOCKER` | `true` | Include Docker container status in the report |

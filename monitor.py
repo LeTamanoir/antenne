@@ -58,7 +58,15 @@ THRESHOLDS = {
 
 # Daemon config
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
+REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
 ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
+
+# Report sections
+REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no")
+REPORT_HDD = os.getenv("REPORT_HDD", "true").lower() not in ("0", "false", "no")
+REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no")
+REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
+REPORT_DOCKER = os.getenv("REPORT_DOCKER", "true").lower() not in ("0", "false", "no")
 
 
 def send_telegram(message: str) -> None:
@@ -150,68 +158,72 @@ def build_report() -> tuple[str, list[str]]:
     lines.append(f"📅 {now}\n")
 
     # NVMe drives
-    for device, label in NVME_DEVICES:
-        nvme_temp = get_nvme_temp(device)
-        if nvme_temp is not None:
-            emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
-            lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
-            if nvme_temp >= THRESHOLDS["nvme_crit"]:
-                alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
-            elif nvme_temp >= THRESHOLDS["nvme_warn"]:
-                alerts.append(f"🟡 WARNING: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
-        else:
-            lines.append(f"💾 *{label}:* ❓ Unable to read")
+    if REPORT_NVME:
+        for device, label in NVME_DEVICES:
+            nvme_temp = get_nvme_temp(device)
+            if nvme_temp is not None:
+                emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
+                lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
+                if nvme_temp >= THRESHOLDS["nvme_crit"]:
+                    alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
+                elif nvme_temp >= THRESHOLDS["nvme_warn"]:
+                    alerts.append(f"🟡 WARNING: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
+            else:
+                lines.append(f"💾 *{label}:* ❓ Unable to read")
 
     # HDDs
-    for device, label in HDD_DEVICES:
-        temp = get_hdd_temp(device)
-        if temp is not None:
-            emoji = temp_emoji(temp, THRESHOLDS["hdd_warn"], THRESHOLDS["hdd_crit"])
-            lines.append(f"🗄️ *{label}:* {emoji} {temp}°C")
-            if temp >= THRESHOLDS["hdd_crit"]:
-                alerts.append(f"🔴 CRITICAL: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_crit']}°C)")
-            elif temp >= THRESHOLDS["hdd_warn"]:
-                alerts.append(f"🟡 WARNING: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_warn']}°C)")
-        else:
-            lines.append(f"🗄️ *{label}:* ❓ Unable to read")
+    if REPORT_HDD:
+        for device, label in HDD_DEVICES:
+            temp = get_hdd_temp(device)
+            if temp is not None:
+                emoji = temp_emoji(temp, THRESHOLDS["hdd_warn"], THRESHOLDS["hdd_crit"])
+                lines.append(f"🗄️ *{label}:* {emoji} {temp}°C")
+                if temp >= THRESHOLDS["hdd_crit"]:
+                    alerts.append(f"🔴 CRITICAL: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_crit']}°C)")
+                elif temp >= THRESHOLDS["hdd_warn"]:
+                    alerts.append(f"🟡 WARNING: {label} temp {temp}°C (threshold: {THRESHOLDS['hdd_warn']}°C)")
+            else:
+                lines.append(f"🗄️ *{label}:* ❓ Unable to read")
 
-    lines.append("")
+    if REPORT_NVME or REPORT_HDD:
+        lines.append("")
 
     # Disk usage
-    for path, label in DISK_MOUNTS:
-        try:
-            usage = get_disk_usage(path)
-            emoji = disk_emoji(usage["percent"])
-            lines.append(f"📁 *{label}:* {emoji} {usage['used']}GB / {usage['total']}GB ({usage['percent']}%)")
-            if usage["percent"] >= THRESHOLDS["disk_crit"]:
-                alerts.append(f"🔴 CRITICAL: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_crit']}%)")
-            elif usage["percent"] >= THRESHOLDS["disk_warn"]:
-                alerts.append(f"🟡 WARNING: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_warn']}%)")
-        except Exception:
-            lines.append(f"📁 *{label}:* ❓ Unable to read")
-
-    lines.append("")
+    if REPORT_DISK:
+        for path, label in DISK_MOUNTS:
+            try:
+                usage = get_disk_usage(path)
+                emoji = disk_emoji(usage["percent"])
+                lines.append(f"📁 *{label}:* {emoji} {usage['used']}GB / {usage['total']}GB ({usage['percent']}%)")
+                if usage["percent"] >= THRESHOLDS["disk_crit"]:
+                    alerts.append(f"🔴 CRITICAL: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_crit']}%)")
+                elif usage["percent"] >= THRESHOLDS["disk_warn"]:
+                    alerts.append(f"🟡 WARNING: {label} usage {usage['percent']}% (threshold: {THRESHOLDS['disk_warn']}%)")
+            except Exception:
+                lines.append(f"📁 *{label}:* ❓ Unable to read")
+        lines.append("")
 
     # RAM
-    ram = get_ram_usage()
-    emoji = "🔴" if ram["percent"] >= THRESHOLDS["ram_warn"] else "🟢"
-    lines.append(f"🧠 *RAM:* {emoji} {ram['used']}GB / {ram['total']}GB ({ram['percent']}%)")
-    if ram["percent"] >= THRESHOLDS["ram_warn"]:
-        alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
-
-    lines.append("")
+    if REPORT_RAM:
+        ram = get_ram_usage()
+        emoji = "🔴" if ram["percent"] >= THRESHOLDS["ram_warn"] else "🟢"
+        lines.append(f"🧠 *RAM:* {emoji} {ram['used']}GB / {ram['total']}GB ({ram['percent']}%)")
+        if ram["percent"] >= THRESHOLDS["ram_warn"]:
+            alerts.append(f"🟡 WARNING: RAM usage {ram['percent']}% (threshold: {THRESHOLDS['ram_warn']}%)")
+        lines.append("")
 
     # Docker containers
-    containers = get_docker_containers()
-    if containers:
-        lines.append("🐳 *Docker Containers:*")
-        for c in containers:
-            emoji = "✅" if c["running"] else "❌"
-            lines.append(f"  {emoji} `{c['name']}`")
-            if not c["running"]:
-                alerts.append(f"❌ ALERT: Container `{c['name']}` is DOWN!")
-    else:
-        lines.append("🐳 *Docker:* ❓ Unable to read containers")
+    if REPORT_DOCKER:
+        containers = get_docker_containers()
+        if containers:
+            lines.append("🐳 *Docker Containers:*")
+            for c in containers:
+                emoji = "✅" if c["running"] else "❌"
+                lines.append(f"  {emoji} `{c['name']}`")
+                if not c["running"]:
+                    alerts.append(f"❌ ALERT: Container `{c['name']}` is DOWN!")
+        else:
+            lines.append("🐳 *Docker:* ❓ Unable to read containers")
 
     return "\n".join(lines), alerts
 
@@ -256,8 +268,8 @@ async def run_daemon() -> None:
         while True:
             now = datetime.now()
 
-            # Daily report at configured hour
-            if now.hour == REPORT_HOUR and last_daily_date != now.date():
+            # Daily report at configured hour and minute
+            if now.hour == REPORT_HOUR and now.minute == REPORT_MINUTE and last_daily_date != now.date():
                 print(f"[{now}] Sending daily report", flush=True)
                 report, alerts = build_report()
                 send_telegram(report)
