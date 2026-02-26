@@ -1,0 +1,16 @@
+services:
+  antenne:
+    image: ghcr.io/letamanoir/antenne:latest
+    container_name: antenne
+    restart: unless-stopped
+    env_file: .env
+    # Required on older kernels (e.g. Linux 4.x) where Docker's default seccomp
+    # profile blocks socket.socketpair(), which Python's asyncio event loop needs.
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    devices:
+      - /dev/nvme0:/dev/nvme0
+      - /dev/sda:/dev/sda
+      - /dev/sdb:/dev/sdb
