@@ -224,6 +224,11 @@ def run_daemon() -> None:
     last_daily_date = None
 
     print("Antenne daemon started", flush=True)
+    now = datetime.now()
+    print(f"[{now}] Sending startup report", flush=True)
+    report, alerts = build_report()
+    send_telegram(report)
+    send_alerts(alerts)
 
     while True:
         now = datetime.now()
