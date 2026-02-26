@@ -70,7 +70,6 @@ def get_disk_usage(path: str) -> dict:
     return {
         "total": usage.total // (1024 ** 3),
         "used": usage.used // (1024 ** 3),
-        "free": usage.free // (1024 ** 3),
         "percent": usage.percent,
     }
 
@@ -96,7 +95,6 @@ def get_docker_containers() -> list[dict]:
             containers.append({
                 "name": name,
                 "running": status.startswith("Up"),
-                "status": status,
             })
         return containers
     except Exception:
