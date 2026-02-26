@@ -58,6 +58,7 @@ THRESHOLDS = {
 
 # Daemon config
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
+REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
 ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
 
 # Report sections
@@ -267,8 +268,8 @@ async def run_daemon() -> None:
         while True:
             now = datetime.now()
 
-            # Daily report at configured hour
-            if now.hour == REPORT_HOUR and last_daily_date != now.date():
+            # Daily report at configured hour and minute
+            if now.hour == REPORT_HOUR and now.minute == REPORT_MINUTE and last_daily_date != now.date():
                 print(f"[{now}] Sending daily report", flush=True)
                 report, alerts = build_report()
                 send_telegram(report)
