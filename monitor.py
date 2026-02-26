@@ -64,7 +64,6 @@ THRESHOLDS = {
 # Daemon config
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
 REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
-ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
 METRICS_INTERVAL_SECONDS = int(os.getenv("METRICS_INTERVAL_SECONDS", "10"))
 
 # Report sections
@@ -455,7 +454,6 @@ def handle_report_command(message):
         send_telegram_photo(graph)
 
 def run_daemon() -> None:
-    last_alert_ts = 0.0
     last_daily_date = None
     init_db()
 
@@ -489,6 +487,8 @@ def run_daemon() -> None:
             stop_ev.wait(METRICS_INTERVAL_SECONDS)
             if not stop_ev.is_set():
                 store_metrics()
+                _, alerts = build_report()
+                send_alerts(alerts)
                 cleanup_old_metrics()
 
     metrics_thread = threading.Thread(
@@ -509,12 +509,6 @@ def run_daemon() -> None:
                 send_telegram_photo(graph)
             last_daily_date = now.date()
 
-        # Alert check at configured interval
-        if time.time() - last_alert_ts >= ALERT_INTERVAL_MINUTES * 60:
-            print(f"[{now}] Running alert check", flush=True)
-            _, alerts = build_report()
-            send_alerts(alerts)
-            last_alert_ts = time.time()
 
         stop_event.wait(60)
 

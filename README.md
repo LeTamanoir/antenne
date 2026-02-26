@@ -47,7 +47,7 @@ volumes:
 docker compose up -d antenne
 ```
 
-The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report with graphs by sending `/rapport` (accepts optional duration like `/rapport 7d`, `/rapport 24h`).
+The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with continuous alert monitoring (all configurable via env vars). You can also trigger an on-demand report with graphs by sending `/rapport` (accepts optional duration like `/rapport 7d`, `/rapport 24h`).
 
 ## Configuration
 
@@ -69,7 +69,6 @@ All values are configurable via environment variables.
 | `RAM_WARN_PERCENT` | `85` | RAM usage warning threshold (%) |
 | `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
 | `REPORT_MINUTE` | `0` | Minute of the hour for the daily report (0–59) |
-| `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |
 | `METRICS_INTERVAL_SECONDS` | `10` | How often to collect metrics for graphs (seconds) |
 | `REPORT_NVME` | `true` | Include NVMe temperatures in the report |
 | `REPORT_HDD` | `true` | Include HDD temperatures in the report |
