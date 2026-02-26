@@ -93,22 +93,24 @@ def send_telegram(message: str) -> None:
 
 def get_nvme_temp(device: str) -> int | None:
     try:
-        out = subprocess.check_output(
-            ["smartctl", "-a", device], text=True
+        result = subprocess.run(
+            ["smartctl", "-a", device], capture_output=True, text=True
         )
-        for line in out.splitlines():
+        for line in result.stdout.splitlines():
             if "Temperature:" in line and "Sensor" not in line:
-                return int(re.search(r"(\d+)\s+Celsius", line).group(1))
+                match = re.search(r"(\d+)\s+Celsius", line)
+                if match:
+                    return int(match.group(1))
     except Exception:
         return None
 
 
 def get_hdd_temp(device: str) -> int | None:
     try:
-        out = subprocess.check_output(
-            ["smartctl", "-a", device], text=True
+        result = subprocess.run(
+            ["smartctl", "-a", device], capture_output=True, text=True
         )
-        for line in out.splitlines():
+        for line in result.stdout.splitlines():
             if "Temperature_Celsius" in line or "Temperature:" in line:
                 match = re.search(r"(\d+)$", line.strip())
                 if match:
@@ -135,7 +137,7 @@ def get_ram_usage() -> dict:
     }
 
 
-def get_docker_containers() -> list[dict]:
+def get_docker_containers() -> list[dict] | None:
     try:
         client = docker.from_env()
         return [
@@ -143,7 +145,7 @@ def get_docker_containers() -> list[dict]:
             for c in client.containers.list(all=True)
         ]
     except Exception:
-        return []
+        return None
 
 
 def temp_emoji(temp: int, warn: int, crit: int) -> str:
@@ -228,7 +230,9 @@ def build_report() -> tuple[str, list[str]]:
     # Docker containers
     if REPORT_DOCKER:
         containers = get_docker_containers()
-        if containers:
+        if containers is None:
+            lines.append("🐳 *Docker:* ❓ Unable to read containers")
+        elif containers:
             lines.append("🐳 *Docker Containers:*")
             for c in containers:
                 emoji = "✅" if c["running"] else "❌"
@@ -236,7 +240,7 @@ def build_report() -> tuple[str, list[str]]:
                 if not c["running"]:
                     alerts.append(f"❌ ALERT: Container `{c['name']}` is DOWN!")
         else:
-            lines.append("🐳 *Docker:* ❓ Unable to read containers")
+            lines.append("🐳 *Docker:* ✅ No containers")
 
     return "\n".join(lines), alerts
 
