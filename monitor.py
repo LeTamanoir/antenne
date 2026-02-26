@@ -357,10 +357,17 @@ def build_report() -> tuple[str, list[str]]:
     return "\n".join(lines), alerts
 
 
-def send_alerts(alerts: list[str]) -> None:
-    if alerts:
-        send_telegram("⚠️ *NAS Alert!*\n\n" + "\n".join(alerts))
+_active_alerts: set[str] = set()
 
+
+def send_alerts(alerts: list[str]) -> None:
+    """Send only new alerts. Clear alerts that have resolved."""
+    current = set(alerts)
+    new_alerts = current - _active_alerts
+    _active_alerts.clear()
+    _active_alerts.update(current)
+    if new_alerts:
+        send_telegram("⚠️ *NAS Alert!*\n\n" + "\n".join(sorted(new_alerts)))
 
 @bot.message_handler(commands=["rapport"])
 def handle_report_command(message):
