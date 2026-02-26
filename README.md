@@ -11,7 +11,7 @@ A Python daemon that monitors the host and sends daily reports + threshold alert
 - ⚠️ Instant alerts when thresholds are crossed
 - 📅 Daily digest report at a configurable time (default 8:00)
 - 📩 Immediate report on daemon startup
-- 📬 On-demand report with graphs via `/report` command (accepts optional duration like `/report 7d`)
+- 📬 On-demand report with graphs via `/rapport` command (accepts optional duration like `/rapport 7d`)
 
 ## Setup
 
@@ -47,7 +47,7 @@ volumes:
 docker compose up -d antenne
 ```
 
-The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report with graphs by sending `/report` (accepts optional duration like `/report 7d`, `/report 24h`).
+The container runs as a daemon: sends a report on startup, then again daily at 8:00 by default, with alert checks every 15 minutes (all configurable via env vars). You can also trigger an on-demand report with graphs by sending `/rapport` (accepts optional duration like `/rapport 7d`, `/rapport 24h`).
 
 ## Configuration
 
@@ -70,7 +70,7 @@ All values are configurable via environment variables.
 | `REPORT_HOUR` | `8` | Hour of day for the daily report (0–23) |
 | `REPORT_MINUTE` | `0` | Minute of the hour for the daily report (0–59) |
 | `ALERT_INTERVAL_MINUTES` | `15` | How often to check for alerts (minutes) |
-| `METRICS_INTERVAL_SECONDS` | `30` | How often to collect metrics for graphs (seconds) |
+| `METRICS_INTERVAL_SECONDS` | `10` | How often to collect metrics for graphs (seconds) |
 | `REPORT_NVME` | `true` | Include NVMe temperatures in the report |
 | `REPORT_HDD` | `true` | Include HDD temperatures in the report |
 | `REPORT_DISK` | `true` | Include disk usage in the report |

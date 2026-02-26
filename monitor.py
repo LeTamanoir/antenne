@@ -65,7 +65,7 @@ THRESHOLDS = {
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "8"))
 REPORT_MINUTE = int(os.getenv("REPORT_MINUTE", "0"))
 ALERT_INTERVAL_MINUTES = int(os.getenv("ALERT_INTERVAL_MINUTES", "15"))
-METRICS_INTERVAL_SECONDS = int(os.getenv("METRICS_INTERVAL_SECONDS", "30"))
+METRICS_INTERVAL_SECONDS = int(os.getenv("METRICS_INTERVAL_SECONDS", "10"))
 
 # Report sections
 REPORT_NVME = os.getenv("REPORT_NVME", "true").lower() not in ("0", "false", "no")
@@ -432,7 +432,7 @@ def send_alerts(alerts: list[str]) -> None:
         send_telegram(alert_msg)
 
 
-@bot.message_handler(commands=["report"])
+@bot.message_handler(commands=["rapport"])
 def handle_report_command(message):
     chat_id = str(message.chat.id)
     if chat_id != str(TELEGRAM_CHAT_ID):
