@@ -15,12 +15,7 @@ A Python daemon for [fourmilière](https://github.com/LeTamanoir/antenne) that m
 
 ### 1. Configure environment
 
-```bash
-cp .env.example .env
-nano .env
-```
-
-Fill in your Telegram bot token and chat ID. All other values have sensible defaults but can be overridden — see `.env.example` for the full list.
+Create a `.env` file with at minimum your Telegram credentials. All other values have sensible defaults — see the configuration table below.
 
 ### 2. Add the service to your `docker-compose.yml`
 
@@ -51,7 +46,7 @@ The container runs as a daemon: daily report at 8am, alert checks every 15 minut
 
 ## Configuration
 
-All values are configurable via environment variables. Copy `.env.example` to `.env` and adjust as needed.
+All values are configurable via environment variables.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
