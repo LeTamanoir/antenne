@@ -36,10 +36,6 @@ antenne:
     - /dev/sdb:/dev/sdb
   cap_add:
     - SYS_RAWIO
-  # Required on older kernels (Linux 4.x) — Docker's default seccomp profile
-  # blocks socket.socketpair(), which Python's asyncio event loop needs.
-  security_opt:
-    - seccomp=unconfined
 ```
 
 ### 3. Start it
