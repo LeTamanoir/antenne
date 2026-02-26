@@ -20,10 +20,6 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Device config
-NVME_DEVICE = os.getenv("NVME_DEVICE", "/dev/nvme0")
-NVME_LABEL = os.getenv("NVME_LABEL", "NVMe")
-
-
 def _parse_device_pairs(env_val: str) -> list[tuple[str, str]]:
     """Parse 'device:label,device:label' env var into list of (device, label) tuples."""
     pairs = []
@@ -35,6 +31,9 @@ def _parse_device_pairs(env_val: str) -> list[tuple[str, str]]:
     return pairs
 
 
+NVME_DEVICES = _parse_device_pairs(
+    os.getenv("NVME_DEVICES", "/dev/nvme0:NVMe")
+)
 HDD_DEVICES = _parse_device_pairs(
     os.getenv("HDD_DEVICES", "/dev/sda:HDD sda,/dev/sdb:HDD sdb")
 )
@@ -67,10 +66,10 @@ def send_telegram(message: str) -> None:
     })
 
 
-def get_nvme_temp() -> int | None:
+def get_nvme_temp(device: str) -> int | None:
     try:
         out = subprocess.check_output(
-            ["smartctl", "-a", NVME_DEVICE], text=True
+            ["smartctl", "-a", device], text=True
         )
         for line in out.splitlines():
             if "Temperature:" in line and "Sensor" not in line:
@@ -153,17 +152,18 @@ def build_report() -> tuple[str, list[str]]:
     lines.append(f"🖥️ *NAS Monitor Report*")
     lines.append(f"📅 {now}\n")
 
-    # NVMe
-    nvme_temp = get_nvme_temp()
-    if nvme_temp is not None:
-        emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
-        lines.append(f"💾 *{NVME_LABEL}:* {emoji} {nvme_temp}°C")
-        if nvme_temp >= THRESHOLDS["nvme_crit"]:
-            alerts.append(f"🔴 CRITICAL: NVMe temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
-        elif nvme_temp >= THRESHOLDS["nvme_warn"]:
-            alerts.append(f"🟡 WARNING: NVMe temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
-    else:
-        lines.append(f"💾 *{NVME_LABEL}:* ❓ Unable to read")
+    # NVMe drives
+    for device, label in NVME_DEVICES:
+        nvme_temp = get_nvme_temp(device)
+        if nvme_temp is not None:
+            emoji = temp_emoji(nvme_temp, THRESHOLDS["nvme_warn"], THRESHOLDS["nvme_crit"])
+            lines.append(f"💾 *{label}:* {emoji} {nvme_temp}°C")
+            if nvme_temp >= THRESHOLDS["nvme_crit"]:
+                alerts.append(f"🔴 CRITICAL: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_crit']}°C)")
+            elif nvme_temp >= THRESHOLDS["nvme_warn"]:
+                alerts.append(f"🟡 WARNING: {label} temp {nvme_temp}°C (threshold: {THRESHOLDS['nvme_warn']}°C)")
+        else:
+            lines.append(f"💾 *{label}:* ❓ Unable to read")
 
     # HDDs
     for device, label in HDD_DEVICES:

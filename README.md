@@ -57,8 +57,7 @@ All values are configurable via environment variables. Copy `.env.example` to `.
 |----------|---------|-------------|
 | `TELEGRAM_TOKEN` | — | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
-| `NVME_DEVICE` | `/dev/nvme0` | NVMe device path |
-| `NVME_LABEL` | `NVMe` | Label shown in reports |
+| `NVME_DEVICES` | `/dev/nvme0:NVMe` | Comma-separated `device:label` pairs |
 | `HDD_DEVICES` | `/dev/sda:HDD sda,/dev/sdb:HDD sdb` | Comma-separated `device:label` pairs |
 | `DISK_MOUNTS` | `/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk` | Comma-separated `path:label` pairs |
 | `NVME_WARN_TEMP` | `70` | NVMe warning threshold (°C) |
