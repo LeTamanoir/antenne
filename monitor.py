@@ -3,22 +3,23 @@
 Antenne - Sends daily reports and threshold alerts via Telegram.
 """
 
-import os
+import contextlib
 import io
+import os
 import re
-import sqlite3
 import signal
-import telebot
-from pySMART import Device
+import sqlite3
 import threading
 from datetime import datetime, timedelta
 
-import psutil
-from dotenv import load_dotenv
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import psutil
+import telebot
+from dotenv import load_dotenv
+from pySMART import Device
 
 load_dotenv()
 
