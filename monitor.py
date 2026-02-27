@@ -100,6 +100,11 @@ def get_disk_temp(device: str) -> int | None:
     return None
 
 
+def _collect_temps() -> dict[str, int | None]:
+    """Collect temperatures for all devices once."""
+    return {device: get_disk_temp(device) for device, _, _, _, _ in TEMP_DEVICES}
+
+
 def get_disk_usage(path: str) -> dict:
     usage = psutil.disk_usage(path)
     return {
@@ -143,14 +148,16 @@ def init_db() -> None:
         """)
 
 
-def store_metrics() -> None:
+def store_metrics(temps: dict[str, int | None] | None = None) -> None:
     """Collect and store current metrics in SQLite."""
     now = datetime.now().isoformat()
     rows = [(now, "cpu_percent", psutil.cpu_percent(interval=1))]
     rows.append((now, "ram_percent", get_ram_usage()["percent"]))
 
+    if temps is None:
+        temps = _collect_temps()
     for device, label, _, _, _ in TEMP_DEVICES:
-        temp = get_disk_temp(device)
+        temp = temps.get(device)
         if temp is not None:
             rows.append((now, f"temp_{label}", float(temp)))
 
@@ -284,7 +291,7 @@ def _level_emoji(value: float, warn: float, crit: float) -> str:
     return "🟢"
 
 
-def build_report() -> tuple[str, list[str]]:
+def build_report(temps: dict[str, int | None] | None = None) -> tuple[str, list[str]]:
     alerts = []
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -295,8 +302,10 @@ def build_report() -> tuple[str, list[str]]:
 
     # Disk temperatures
     if REPORT_TEMPS:
+        if temps is None:
+            temps = _collect_temps()
         for device, label, icon, warn, crit in TEMP_DEVICES:
-            temp = get_disk_temp(device)
+            temp = temps.get(device)
             if temp is not None:
                 emoji = _level_emoji(temp, warn, crit)
                 avg = query_metric_avg(f"temp_{label}", avg_dur)
@@ -396,17 +405,19 @@ def run_daemon() -> None:
 
     now = datetime.now()
     print(f"[{now}] Sending startup report", flush=True)
-    report, alerts = build_report()
+    temps = _collect_temps()
+    report, alerts = build_report(temps=temps)
     send_telegram(report)
     send_alerts(alerts)
-    store_metrics()
+    store_metrics(temps=temps)
 
     def _collect_metrics(stop_ev: threading.Event) -> None:
         while not stop_ev.is_set():
             stop_ev.wait(METRICS_INTERVAL_SECONDS)
             if not stop_ev.is_set():
-                store_metrics()
-                _, alerts = build_report()
+                temps = _collect_temps()
+                store_metrics(temps=temps)
+                _, alerts = build_report(temps=temps)
                 send_alerts(alerts)
                 cleanup_old_metrics()
 
