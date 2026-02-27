@@ -118,21 +118,29 @@ def get_ram_usage() -> dict:
     }
 
 
+@contextlib.contextmanager
+def _db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     """Create metrics table if it doesn't exist."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS metrics (
-            timestamp TEXT NOT NULL,
-            metric_name TEXT NOT NULL,
-            metric_value REAL NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics (timestamp)
-    """)
-    conn.commit()
-    conn.close()
+    with _db_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS metrics (
+                timestamp TEXT NOT NULL,
+                metric_name TEXT NOT NULL,
+                metric_value REAL NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics (timestamp)
+        """)
 
 
 def store_metrics() -> None:
@@ -147,13 +155,11 @@ def store_metrics() -> None:
             rows.append((now, f"temp_{label}", float(temp)))
 
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.executemany(
-            "INSERT INTO metrics (timestamp, metric_name, metric_value) VALUES (?, ?, ?)",
-            rows,
-        )
-        conn.commit()
-        conn.close()
+        with _db_connection() as conn:
+            conn.executemany(
+                "INSERT INTO metrics (timestamp, metric_name, metric_value) VALUES (?, ?, ?)",
+                rows,
+            )
     except Exception as e:
         print(f"store_metrics() error: {e}", flush=True)
 
@@ -162,12 +168,11 @@ def query_metrics(metric_name: str, duration: timedelta) -> list[tuple[datetime,
     """Query metrics for a given name and time window."""
     since = (datetime.now() - duration).isoformat()
     try:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            "SELECT timestamp, metric_value FROM metrics WHERE metric_name = ? AND timestamp >= ? ORDER BY timestamp",
-            (metric_name, since),
-        ).fetchall()
-        conn.close()
+        with _db_connection() as conn:
+            rows = conn.execute(
+                "SELECT timestamp, metric_value FROM metrics WHERE metric_name = ? AND timestamp >= ? ORDER BY timestamp",
+                (metric_name, since),
+            ).fetchall()
         return [(datetime.fromisoformat(ts), val) for ts, val in rows]
     except Exception as e:
         print(f"query_metrics() error: {e}", flush=True)
@@ -178,42 +183,23 @@ def query_metric_avg(metric_name: str, duration: timedelta) -> float | None:
     """Query average value for a metric over the given time window."""
     since = (datetime.now() - duration).isoformat()
     try:
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT AVG(metric_value) FROM metrics WHERE metric_name = ? AND timestamp >= ?",
-            (metric_name, since),
-        ).fetchone()
-        conn.close()
+        with _db_connection() as conn:
+            row = conn.execute(
+                "SELECT AVG(metric_value) FROM metrics WHERE metric_name = ? AND timestamp >= ?",
+                (metric_name, since),
+            ).fetchone()
         return row[0] if row and row[0] is not None else None
     except Exception as e:
         print(f"query_metric_avg() error: {e}", flush=True)
         return None
 
 
-def parse_duration(text: str) -> timedelta:
-    """Parse duration string like '24h', '7d', '30m' into timedelta."""
-    text = text.strip().lower()
-    match = re.match(r"^(\d+)\s*([hdm])$", text)
-    if match:
-        value = int(match.group(1))
-        unit = match.group(2)
-        if unit == "h":
-            return timedelta(hours=value)
-        elif unit == "d":
-            return timedelta(days=value)
-        elif unit == "m":
-            return timedelta(minutes=value)
-    return timedelta(hours=24)
-
-
 def cleanup_old_metrics(max_age_hours: int = 48) -> None:
     """Delete metrics older than max_age_hours."""
     cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
-        conn.commit()
-        conn.close()
+        with _db_connection() as conn:
+            conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
     except Exception as e:
         print(f"cleanup_old_metrics() error: {e}", flush=True)
 
