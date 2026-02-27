@@ -211,6 +211,22 @@ def cleanup_old_metrics(max_age_hours: int = 48) -> None:
         print(f"cleanup_old_metrics() error: {e}", flush=True)
 
 
+
+def parse_duration(text: str) -> timedelta:
+    """Parse duration string like '24h', '7d', '30m' into timedelta."""
+    text = text.strip().lower()
+    match = re.match(r"^(\d+)\s*([hdm])$", text)
+    if match:
+        value, unit = int(match.group(1)), match.group(2)
+        if unit == "h":
+            return timedelta(hours=value)
+        if unit == "d":
+            return timedelta(days=value)
+        if unit == "m":
+            return timedelta(minutes=value)
+    return timedelta(hours=24)
+
+
 def _setup_chart(title: str, ylabel: str, ylim: tuple | None = None) -> tuple:
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.set_title(title)
