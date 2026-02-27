@@ -71,6 +71,7 @@ REPORT_DISK = os.getenv("REPORT_DISK", "true").lower() not in ("0", "false", "no
 REPORT_RAM = os.getenv("REPORT_RAM", "true").lower() not in ("0", "false", "no")
 DB_PATH = os.getenv("DB_PATH", "/app/data/antenne.db")
 DEFAULT_GRAPH_DURATION = os.getenv("DEFAULT_GRAPH_DURATION", "24h")
+REPORT_NAME = os.getenv("REPORT_NAME", "🐜 Antenne")
 
 
 def send_telegram(message: str) -> None:
@@ -302,7 +303,7 @@ def build_report() -> tuple[str, list[str]]:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     avg_dur = timedelta(hours=48)
 
-    lines.append("🐜 *Antenne*")
+    lines.append(f"*{REPORT_NAME}*")
     lines.append(f"📅 {now}\n")
 
     # Disk temperatures
