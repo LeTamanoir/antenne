@@ -57,6 +57,7 @@ All values are configurable via environment variables.
 |----------|---------|-------------|
 | `TELEGRAM_TOKEN` | — | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
+| `REPORT_NAME` | 🐜 Antenne | Name shown in the report header |
 | `NVME_DEVICES` | `/dev/nvme0:NVMe` | Comma-separated `device:label` pairs |
 | `HDD_DEVICES` | `/dev/sda:HDD sda,/dev/sdb:HDD sdb` | Comma-separated `device:label` pairs |
 | `DISK_MOUNTS` | `/mnt/movies:Movies Drive,/mnt/tv:TV Drive,/:System Disk` | Comma-separated `path:label` pairs |
